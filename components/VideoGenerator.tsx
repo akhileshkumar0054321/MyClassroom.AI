@@ -18,7 +18,7 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number>(0);
   
   // Recording State
   const [isRecording, setIsRecording] = useState(false);

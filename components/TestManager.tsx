@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { generateTest } from '../services/gemini';
+import { generateTest, analyzeProctoringFrame } from '../services/gemini';
 import { TestData, QuestionType, User, UserRole, TestResult, Classroom } from '../types';
 import { 
     CheckCircle, XCircle, AlertCircle, Award, Loader2, Clock, 
     ShieldAlert, Plus, Play, Eye, FileText, Globe, Camera, Mic, 
-    Users, AlertTriangle, ScreenShare, Activity, Lock, Gavel, Monitor, X
+    Users, AlertTriangle, ScreenShare, Activity, Lock, Gavel, Monitor, X, CheckSquare, Square, Megaphone
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -16,10 +16,12 @@ interface TestManagerProps {
   classrooms: Classroom[];
   onAddTest: (test: TestData) => void;
   onSaveResult: (result: TestResult) => void;
-  onDeployTest: (testId: string, classId: string) => void;
+  onDeployTest: (testId: string, classIds: string[]) => void;
+  onPublishResults: (testId: string) => void; // New prop
+  onExit?: () => void;
 }
 
-const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistory, classrooms, onAddTest, onSaveResult, onDeployTest }) => {
+const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistory, classrooms, onAddTest, onSaveResult, onDeployTest, onPublishResults, onExit }) => {
   // Navigation & View State
   const [view, setView] = useState<'LIST' | 'CREATE_SELECT' | 'CREATE_AI' | 'CREATE_MANUAL' | 'TAKE' | 'SUBMITTING' | 'RESULT' | 'DEPLOY' | 'PROCTOR_DASHBOARD' | 'PERMISSIONS'>('LIST');
   
@@ -31,7 +33,9 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   const [manualQuestions, setManualQuestions] = useState<{text: string, answer: string}[]>([]);
   const [currentManualQ, setCurrentManualQ] = useState('');
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
-  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  
+  // Multi-select Deployment
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
 
   // Student State
   const [joinCode, setJoinCode] = useState('');
@@ -43,8 +47,14 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   // PROCTORING STATE
   const [violationLog, setViolationLog] = useState<string[]>([]);
   const [warnings, setWarnings] = useState(0);
+  const [proctorStatus, setProctorStatus] = useState('Monitoring');
+  const [audioLevel, setAudioLevel] = useState(0);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const lastViolationRef = useRef<number>(0);
 
   // --- TEACHER ACTIONS ---
 
@@ -58,7 +68,8 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
           creatorId: user.id, 
           status: 'DRAFT',
           accessCode: Math.floor(100000 + Math.random() * 900000).toString(),
-          settings: { ...data.settings, proctoring: true }
+          settings: { ...data.settings, proctoring: true },
+          resultsPublished: false
       };
       onAddTest(newTest);
       setView('LIST');
@@ -90,7 +101,8 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
               type: QuestionType.SHORT,
               explanation: 'Manual question',
               difficulty: 'Medium'
-          }))
+          })),
+          resultsPublished: false
       };
       onAddTest(newTest);
       setView('LIST');
@@ -100,14 +112,29 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
 
   const openDeployModal = (testId: string) => {
       setSelectedTestId(testId);
+      setSelectedClassIds([]); // Reset
       setView('DEPLOY');
   }
 
+  const toggleClassSelection = (classId: string) => {
+      setSelectedClassIds(prev => 
+          prev.includes(classId) 
+              ? prev.filter(id => id !== classId) 
+              : [...prev, classId]
+      );
+  };
+
   const handleDeploy = () => {
-      if (selectedTestId && selectedClassId) {
-          onDeployTest(selectedTestId, selectedClassId);
+      if (selectedTestId && selectedClassIds.length > 0) {
+          onDeployTest(selectedTestId, selectedClassIds);
           setView('LIST');
-          setSelectedClassId('');
+          setSelectedClassIds([]);
+      }
+  };
+
+  const handleAnnounce = (testId: string) => {
+      if(confirm("Are you sure? All students will be notified and can see their results immediately.")) {
+          onPublishResults(testId);
       }
   };
 
@@ -115,18 +142,37 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   
   const requestPermissions = async () => {
       try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          // Request permissions with specific constraints for mobile & sensitivity
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+              video: { 
+                  facingMode: 'user', // Prefer front camera for self-view on mobile
+                  width: { ideal: 640 },
+                  height: { ideal: 480 }
+              }, 
+              audio: { 
+                  echoCancellation: true, 
+                  noiseSuppression: true,
+                  autoGainControl: true 
+              } 
+          });
           streamRef.current = stream;
           setPermissionsGranted(true);
           setView('TAKE');
       } catch (e) {
-          alert("Permission Denied: Camera and Microphone are required for proctoring.");
+          console.error("Permission Error:", e);
+          alert("Permission Denied: Camera and Microphone are required. Please check your browser settings or ensure no other app is using the camera.");
       }
   }
 
   const joinLiveTest = () => {
       const test = globalTests.find(t => t.accessCode === joinCode || t.id === 'demo-photosynthesis'); // Demo hack
       if (test) {
+          // Check if already taken
+          const taken = testHistory.find(r => r.testId === test.id);
+          if (taken) {
+              alert("You have already submitted this test. Please wait for results.");
+              return;
+          }
           initiateTest(test);
       } else {
           alert("Invalid Code or Test Not Live");
@@ -141,6 +187,19 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
       setAnswers({});
       setView('PERMISSIONS');
   }
+
+  const viewMyResult = (test: TestData) => {
+      // Find the specific result
+      const result = testHistory.find(r => r.testId === test.id);
+      if (result) {
+          // Set state to simulate the "RESULT" view logic
+          setActiveTest(test);
+          setAnswers(result.answers);
+          setWarnings(result.warningsCount || 0);
+          setViolationLog(result.violationLog || []);
+          setView('RESULT');
+      }
+  };
 
   // --- PROCTORING LOGIC ---
 
@@ -158,20 +217,115 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
         // Clean up stream on unmount or view change
         if (streamRef.current && view !== 'TAKE') {
             streamRef.current.getTracks().forEach(track => track.stop());
+            if (audioContextRef.current) {
+                audioContextRef.current.close();
+                audioContextRef.current = null;
+            }
         }
     };
   }, [view]);
 
-  // Attach stream to video element when view changes to TAKE
+  // Initialize Sensors when in TAKE mode
   useEffect(() => {
-      if (view === 'TAKE' && videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
+      let visionInterval: any;
+      let audioInterval: any;
+
+      if (view === 'TAKE' && permissionsGranted && streamRef.current) {
+          // 1. Setup Video
+          if (videoRef.current) {
+              videoRef.current.srcObject = streamRef.current;
+          }
+
+          // 2. Setup Audio
+          if (!audioContextRef.current) {
+              try {
+                  const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                  audioContextRef.current = new AudioContext();
+                  analyserRef.current = audioContextRef.current.createAnalyser();
+                  const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+                  source.connect(analyserRef.current);
+                  analyserRef.current.fftSize = 256;
+                  analyserRef.current.smoothingTimeConstant = 0.5; // Smooth out jitter
+                  
+                  // Resume context if suspended (common on mobile browsers)
+                  if (audioContextRef.current.state === 'suspended') {
+                      audioContextRef.current.resume();
+                  }
+              } catch (e) {
+                  console.error("Audio Context Error", e);
+              }
+          }
+
+          // 3. Start AI Vision Loop (Every 5 seconds)
+          visionInterval = setInterval(checkVision, 5000);
+
+          // 4. Start Audio Loop (Every 200ms for high responsiveness)
+          audioInterval = setInterval(checkAudio, 200);
       }
+
+      return () => {
+          clearInterval(visionInterval);
+          clearInterval(audioInterval);
+      };
   }, [view, permissionsGranted]);
+
+  const checkAudio = () => {
+      if (!analyserRef.current) return;
+      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+      analyserRef.current.getByteFrequencyData(dataArray);
+      
+      // Calculate average volume
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      setAudioLevel(average);
+
+      // SENSITIVITY SETTING:
+      // A threshold of 15 is usually just above the noise floor of a quiet room.
+      // This will detect whispering or low talking.
+      const THRESHOLD = 15; 
+
+      if (average > THRESHOLD) {
+          triggerViolation("Audio Alert: Voice/Whispering Detected");
+      }
+  };
+
+  const checkVision = async () => {
+      if (!videoRef.current) return;
+      
+      // Draw video to low-res canvas for analysis
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1]; // Compress jpg
+
+      setProctorStatus('AI Analyzing...');
+      try {
+          // Send to Gemini
+          const result = await analyzeProctoringFrame(base64);
+          
+          if (result.suspicious) {
+              triggerViolation(`AI Vision Alert: ${result.reason}`);
+          }
+      } catch (e) {
+          console.error("Vision Check Failed", e);
+      } finally {
+          setProctorStatus('Monitoring');
+      }
+  };
 
   const triggerViolation = (reason: string, isSevere: boolean = false) => {
       if (view !== 'TAKE') return;
 
+      const now = Date.now();
+      // Debounce: Avoid spammed warnings within 5 seconds for the same reason
+      if (!isSevere && (now - lastViolationRef.current < 5000)) {
+          return;
+      }
+      
+      lastViolationRef.current = now;
       const log = `${new Date().toLocaleTimeString()}: ${reason}`;
       setViolationLog(prev => [...prev, log]);
 
@@ -181,13 +335,25 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
            return;
       }
 
-      const newWarnings = warnings + 1;
-      setWarnings(newWarnings);
+      setWarnings(prev => {
+          const newCount = prev + 1;
+          
+          // Warning Toast
+          const toast = document.createElement('div');
+          toast.className = "fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-lg shadow-2xl z-[100] animate-bounce font-bold border-2 border-white text-center";
+          toast.innerText = `⚠️ WARNING (${newCount}/5): ${reason}`;
+          document.body.appendChild(toast);
+          setTimeout(() => toast.remove(), 4000);
 
-      if (newWarnings >= 5) {
-          alert("Maximum warnings (5/5) reached. Auto-submitting test.");
-          submitTest(true);
-      }
+          if (newCount >= 5) {
+              // Use timeout to allow state update to reflect before alert
+              setTimeout(() => {
+                  alert("Maximum warnings (5/5) reached. System is auto-submitting your test.");
+                  submitTest(true);
+              }, 500);
+          }
+          return newCount;
+      });
   };
 
   const handleTimerTick = () => {
@@ -215,9 +381,12 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
     // Switch to SUBMITTING state
     setView('SUBMITTING');
 
-    // Stop camera
+    // Stop camera & audio
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    if (audioContextRef.current) {
+        audioContextRef.current.close();
     }
 
     // Simulate "Uploading" delay for realism
@@ -236,19 +405,25 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
           maxScore: activeTest.questions.length,
           answers,
           dateTaken: new Date().toISOString(),
-          status: 'AWAITED',
+          status: 'COMPLETED',
           violationLog,
           warningsCount: warnings,
           autoSubmitted: auto
         };
         
         onSaveResult(result);
-        setView('RESULT');
+        
         confetti({
             particleCount: 150,
             spread: 70,
             origin: { y: 0.6 }
         });
+
+        if (onExit) {
+            onExit();
+        } else {
+            setView('LIST'); // Return to list instead of result directly (Wait for publish)
+        }
     }, 2000);
   };
 
@@ -278,15 +453,27 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                                       <h3 className="text-xl font-bold dark:text-white flex items-center gap-2">
                                           {test.title}
                                           {test.status === 'LIVE' && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded animate-pulse font-bold">● LIVE</span>}
+                                          {test.resultsPublished && <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded font-bold">RESULTS OUT</span>}
                                       </h3>
                                       <div className="flex gap-4 text-sm text-gray-500 mt-1">
                                           <span>{test.questions.length} Questions</span>
                                           <span className="font-mono bg-gray-100 dark:bg-gray-700 px-2 rounded">Code: {test.accessCode || 'N/A'}</span>
-                                          {test.assignedClassName && <span className="text-blue-600 dark:text-blue-400 font-medium">Class: {test.assignedClassName}</span>}
+                                          {/* Show count of deployed classes */}
+                                          {test.assignedClassIds && test.assignedClassIds.length > 0 && <span className="text-blue-600 dark:text-blue-400 font-medium">Assigned to {test.assignedClassIds.length} Classes</span>}
                                       </div>
                                   </div>
                                   <div className="flex gap-2">
+                                      {test.status !== 'DRAFT' && !test.resultsPublished && (
+                                          <button 
+                                            onClick={() => handleAnnounce(test.id)}
+                                            className="bg-purple-100 text-purple-700 hover:bg-purple-200 px-4 py-2 rounded font-bold text-sm flex items-center gap-2"
+                                          >
+                                              <Megaphone className="w-4 h-4" /> Announce Result
+                                          </button>
+                                      )}
+                                      
                                       <button className="text-gray-500 hover:text-primary-600 p-2"><Eye className="w-5 h-5"/></button>
+                                      
                                       {test.status === 'DRAFT' && (
                                           <button 
                                             onClick={() => openDeployModal(test.id)}
@@ -360,23 +547,32 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                           <h3 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
                               <Globe className="w-5 h-5 text-green-500"/> Deploy Test
                           </h3>
-                          <p className="text-gray-500 mb-6">Select a class to assign this test to. Students will be notified immediately.</p>
+                          <p className="text-gray-500 mb-6">Select classrooms to assign this test to. Students will be notified immediately.</p>
                           
-                          <select 
-                              value={selectedClassId}
-                              onChange={(e) => setSelectedClassId(e.target.value)}
-                              className="w-full p-3 border rounded-lg mb-6 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                          >
-                              <option value="">-- Select Classroom --</option>
-                              {classrooms.map(c => (
-                                  <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                          <div className="space-y-3 mb-6 max-h-60 overflow-y-auto">
+                              {classrooms.length === 0 ? (
+                                  <p className="text-sm text-red-500">No classrooms found. Create one first.</p>
+                              ) : classrooms.map(c => (
+                                  <div 
+                                    key={c.id} 
+                                    onClick={() => toggleClassSelection(c.id)}
+                                    className={`p-3 rounded-lg border cursor-pointer flex items-center gap-3 transition-colors ${selectedClassIds.includes(c.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500' : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                                  >
+                                      <div className={`w-5 h-5 rounded border flex items-center justify-center ${selectedClassIds.includes(c.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-400 bg-white'}`}>
+                                          {selectedClassIds.includes(c.id) && <CheckSquare className="w-3 h-3"/>}
+                                      </div>
+                                      <div>
+                                          <p className="font-bold text-sm dark:text-white">{c.name}</p>
+                                          <p className="text-xs text-gray-500">{c.code} • {c.studentIds.length} Students</p>
+                                      </div>
+                                  </div>
                               ))}
-                          </select>
+                          </div>
 
                           <div className="flex gap-4 justify-end">
                               <button onClick={() => setView('LIST')} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg">Cancel</button>
-                              <button onClick={handleDeploy} disabled={!selectedClassId} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50 hover:bg-green-700 shadow-lg">
-                                  Deploy Now
+                              <button onClick={handleDeploy} disabled={selectedClassIds.length === 0} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50 hover:bg-green-700 shadow-lg">
+                                  Deploy to Selected
                               </button>
                           </div>
                       </div>
@@ -502,20 +698,37 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   <div>
                       <h3 className="text-xl font-bold dark:text-white mb-4">Assigned Tests</h3>
                       <div className="grid gap-4">
-                          {globalTests.filter(t => t.status === 'LIVE' || t.id === 'demo-photosynthesis').map(test => (
-                              <div key={test.id} className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700 flex justify-between items-center transition-transform hover:scale-[1.01]">
-                                  <div>
-                                      <h4 className="font-bold text-lg dark:text-white">{test.title}</h4>
-                                      <div className="flex gap-2 mt-1">
-                                          <span className="text-sm text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded animate-pulse">● LIVE NOW</span>
-                                          {test.settings.proctoring && <span className="text-sm text-red-600 font-bold bg-red-100 px-2 py-0.5 rounded flex items-center gap-1"><ShieldAlert className="w-3 h-3"/> PROCTORED</span>}
+                          {globalTests.filter(t => t.status === 'LIVE' || t.id === 'demo-photosynthesis').map(test => {
+                              const alreadyTaken = testHistory.some(r => r.testId === test.id);
+                              
+                              return (
+                                  <div key={test.id} className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700 flex justify-between items-center transition-transform hover:scale-[1.01]">
+                                      <div>
+                                          <h4 className="font-bold text-lg dark:text-white">{test.title}</h4>
+                                          <div className="flex gap-2 mt-1">
+                                              <span className="text-sm text-green-600 font-bold bg-green-100 px-2 py-0.5 rounded animate-pulse">● LIVE NOW</span>
+                                              {test.settings.proctoring && <span className="text-sm text-red-600 font-bold bg-red-100 px-2 py-0.5 rounded flex items-center gap-1"><ShieldAlert className="w-3 h-3"/> PROCTORED</span>}
+                                          </div>
                                       </div>
+                                      
+                                      {alreadyTaken ? (
+                                          test.resultsPublished ? (
+                                              <button onClick={() => viewMyResult(test)} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-green-700 flex items-center gap-2">
+                                                  <CheckCircle className="w-4 h-4"/> View Result
+                                              </button>
+                                          ) : (
+                                              <button disabled className="bg-yellow-100 text-yellow-700 px-6 py-2 rounded-lg font-bold shadow-sm border border-yellow-200 cursor-not-allowed flex items-center gap-2 animate-pulse">
+                                                  <Clock className="w-4 h-4"/> Waiting for Result
+                                              </button>
+                                          )
+                                      ) : (
+                                          <button onClick={() => initiateTest(test)} className="bg-primary-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-primary-700">
+                                              Start Exam
+                                          </button>
+                                      )}
                                   </div>
-                                  <button onClick={() => initiateTest(test)} className="bg-primary-600 text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-primary-700">
-                                      Start Exam
-                                  </button>
-                              </div>
-                          ))}
+                              );
+                          })}
                       </div>
                   </div>
               </div>
@@ -529,7 +742,9 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   <h2 className="text-3xl font-bold dark:text-white mb-4">Proctoring Required</h2>
                   <p className="text-gray-600 dark:text-gray-300 mb-8 text-lg">
                       This exam requires access to your **Camera** and **Microphone** for AI invigilation. 
-                      Strict anti-cheating measures are active.
+                      Strict anti-cheating measures are active. 
+                      <br/><br/>
+                      <span className="text-red-500 font-bold">Warning:</span> Suspicious eye movements or looking away will trigger auto-warnings. 5 warnings = Fail.
                   </p>
                   
                   <div className="flex justify-center gap-12 mb-10">
@@ -587,10 +802,10 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                       </div>
                   </div>
 
-                  {/* BODY */}
-                  <div className="flex-1 flex gap-6 overflow-hidden">
-                      {/* Questions */}
-                      <div className="flex-1 overflow-y-auto pr-4 pb-20">
+                  {/* BODY - RESPONSIVE LAYOUT */}
+                  <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
+                      {/* Questions (Order 2 on mobile to be below camera) */}
+                      <div className="flex-1 overflow-y-auto pr-4 pb-20 order-2 lg:order-1">
                           {activeTest.questions.map((q, i) => (
                               <div key={q.id} className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
                                   <div className="flex gap-4">
@@ -632,8 +847,8 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                           </button>
                       </div>
 
-                      {/* SIDEBAR: PROCTORING & JUDGE CONTROLS */}
-                      <div className="w-80 flex flex-col gap-4">
+                      {/* SIDEBAR: PROCTORING STATUS (Order 1 on mobile to be top) */}
+                      <div className="w-full lg:w-80 flex flex-col gap-4 order-1 lg:order-2 flex-shrink-0">
                           {/* Camera Feed */}
                           <div className="bg-black rounded-xl overflow-hidden shadow-lg border-2 border-red-500 relative aspect-video">
                               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover transform scale-x-[-1]" />
@@ -641,36 +856,71 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                                   <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
                                   <span className="text-xs text-white font-bold bg-black/50 px-2 py-0.5 rounded">REC</span>
                               </div>
-                          </div>
+                              
+                              {/* Audio Warning Overlay */}
+                              {audioLevel > 15 && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-red-900/40 backdrop-blur-sm z-20 animate-pulse">
+                                      <div className="bg-red-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-2xl">
+                                          <Mic className="w-6 h-6 animate-bounce" />
+                                          <span>🔊 VOICE DETECTED</span>
+                                      </div>
+                                  </div>
+                              )}
 
-                          {/* JUDGE CONTROL PANEL */}
-                          <div className="bg-yellow-50 dark:bg-yellow-900/10 border-2 border-yellow-400 dark:border-yellow-600 rounded-xl p-4">
-                              <h3 className="text-sm font-bold text-yellow-800 dark:text-yellow-500 uppercase tracking-wide mb-3 flex items-center gap-2">
-                                  <Gavel className="w-4 h-4" /> Judge Controls (Sim)
-                              </h3>
-                              <div className="space-y-2">
-                                  <button onClick={() => triggerViolation("Suspicious Eye Movement Detected")} className="w-full bg-white dark:bg-gray-800 text-xs font-bold py-2 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center gap-2">
-                                      <Eye className="w-3 h-3"/> Sim: Eye Movement
-                                  </button>
-                                  <button onClick={() => triggerViolation("Background Audio Detected")} className="w-full bg-white dark:bg-gray-800 text-xs font-bold py-2 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center gap-2">
-                                      <Mic className="w-3 h-3"/> Sim: Audio Noise
-                                  </button>
-                                  <div className="h-px bg-yellow-200 dark:bg-yellow-800 my-2"></div>
-                                  <button onClick={() => triggerViolation("Multiple Faces Detected", true)} className="w-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-bold py-2 rounded border border-red-200 dark:border-red-800 hover:bg-red-200 flex items-center justify-center gap-2">
-                                      <Users className="w-3 h-3"/> Sim: Multiple Faces (FAIL)
-                                  </button>
-                                  <button onClick={() => triggerViolation("Camera Disconnected", true)} className="w-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-bold py-2 rounded border border-red-200 dark:border-red-800 hover:bg-red-200 flex items-center justify-center gap-2">
-                                      <Monitor className="w-3 h-3"/> Sim: Cam Disconnect (FAIL)
-                                  </button>
+                              <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center text-xs text-white z-10">
+                                  <span className="bg-black/50 px-2 rounded flex items-center gap-1">
+                                      {proctorStatus.includes('Analyzing') ? <Loader2 className="w-3 h-3 animate-spin"/> : <Eye className="w-3 h-3"/>}
+                                      {proctorStatus}
+                                  </span>
+                                  {audioLevel > 15 && (
+                                      <span className="bg-red-500/80 px-2 rounded animate-pulse font-bold">
+                                          NOISE ALERT
+                                      </span>
+                                  )}
                               </div>
                           </div>
 
-                          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-xs text-blue-800 dark:text-blue-300">
-                              <p className="font-bold mb-1">ℹ️ Active Monitoring:</p>
-                              <ul className="list-disc pl-4 space-y-1">
-                                  <li>Tab switching triggers auto-fail.</li>
-                                  <li>5 warnings = auto-submit.</li>
-                                  <li>Face/Audio AI is active.</li>
+                          {/* Monitoring Status Panel */}
+                          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm">
+                              <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3 flex items-center gap-2">
+                                  <Activity className="w-4 h-4 text-green-500" /> Active Sensors
+                              </h3>
+                              
+                              <div className="space-y-3">
+                                  {/* Audio Meter */}
+                                  <div>
+                                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                          <span>Audio Level (Whisper Sensitive)</span>
+                                          <span className={audioLevel > 15 ? 'text-red-500 font-bold' : ''}>{Math.round(audioLevel)}</span>
+                                      </div>
+                                      <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                          <div 
+                                            className={`h-full transition-all duration-100 ${audioLevel > 15 ? 'bg-red-500' : 'bg-green-500'}`} 
+                                            style={{ width: `${Math.min(audioLevel * 3, 100)}%` }} // Amplified visual for low values
+                                          ></div>
+                                      </div>
+                                  </div>
+
+                                  {/* AI Status */}
+                                  <div className="flex items-center gap-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-100 dark:border-blue-800">
+                                      <div className="p-1.5 bg-blue-100 dark:bg-blue-800 rounded text-blue-600 dark:text-blue-200">
+                                          <Eye className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                          <p className="text-xs font-bold text-blue-800 dark:text-blue-200">Gemini Vision AI</p>
+                                          <p className="text-[10px] text-blue-600 dark:text-blue-300">Scanning face & gaze every 5s</p>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-xl text-xs text-yellow-800 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-700">
+                              <p className="font-bold mb-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Anti-Cheating Rules:</p>
+                              <ul className="list-disc pl-4 space-y-1 opacity-90">
+                                  <li>Do not look away from screen.</li>
+                                  <li>No whispering or talking (High Sensitivity).</li>
+                                  <li>No multiple faces in frame.</li>
+                                  <li>Tab switching = Immediate Fail.</li>
                               </ul>
                           </div>
                       </div>
@@ -694,9 +944,20 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
                       <CheckCircle className="w-10 h-10 text-green-600" />
                   </div>
-                  <h2 className="text-3xl font-bold dark:text-white mb-2">Exam Submitted Successfully!</h2>
-                  <p className="text-gray-500 mb-8">Your responses have been recorded and sent for grading.</p>
+                  <h2 className="text-3xl font-bold dark:text-white mb-2">Exam Result</h2>
+                  <p className="text-gray-500 mb-8">
+                      {activeTest?.resultsPublished ? "Here is how you performed." : "Your responses have been recorded and sent for grading."}
+                  </p>
                   
+                  {/* Score Display */}
+                  <div className="mb-8">
+                      <span className="text-6xl font-bold text-primary-600">{
+                          // Calculate mock score based on answers if not available
+                          Object.keys(answers).length // Mock score logic just for display if actual score isn't passed
+                      }</span>
+                      <span className="text-2xl text-gray-400"> / {activeTest?.questions.length}</span>
+                  </div>
+
                   <div className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg text-left mb-8">
                       <h3 className="font-bold mb-4 dark:text-white">Proctoring Report</h3>
                       <div className="flex justify-between items-center mb-2">

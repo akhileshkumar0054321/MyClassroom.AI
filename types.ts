@@ -100,37 +100,6 @@ export interface LibraryItem {
   originalOwnerName?: string;
 }
 
-// Classroom & Assignments
-export interface Assignment {
-  id: string;
-  title: string;
-  description: string;
-  classroomId: string;
-  dueDate: string;
-  status: 'PENDING' | 'SUBMITTED';
-  type: 'AI' | 'MANUAL';
-  questions?: string[];
-}
-
-export interface ClassroomSettings {
-  expiryDate?: string;
-  joinLimit?: number;
-  requiresApproval: boolean;
-}
-
-export interface Classroom {
-  id: string;
-  name: string;
-  subject: string;
-  teacherId: string;
-  studentIds: string[];
-  code: string;
-  // Invite Link Features
-  inviteLink?: string;
-  isLinkActive?: boolean;
-  settings?: ClassroomSettings;
-}
-
 // Video Generation Types
 export interface VideoChapter {
   title: string;
@@ -165,7 +134,12 @@ export enum QuestionType {
   MCQ = 'MCQ',
   SHORT = 'SHORT',
   LONG = 'LONG',
-  VIDEO_RESPONSE = 'VIDEO_RESPONSE'
+  VIDEO_RESPONSE = 'VIDEO_RESPONSE',
+  ONE_WORD = 'ONE_WORD',
+  FILL_BLANKS = 'FILL_BLANKS',
+  TRUE_FALSE = 'TRUE_FALSE',
+  ORAL = 'ORAL',
+  NUMERICAL = 'NUMERICAL'
 }
 
 export interface Question {
@@ -174,8 +148,68 @@ export interface Question {
   type: QuestionType;
   options?: string[]; // For MCQ
   correctAnswer?: string;
+  modelAnswer?: string; // For subjective/long answers
   explanation: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
+  marks?: number;
+}
+
+export interface AssignmentSubmission {
+  studentId: string;
+  studentName: string;
+  submittedAt: string;
+  answers: Record<number, string>; // questionId -> text answer or audio URL
+  audioBlobs?: Record<number, string>; // questionId -> base64 audio
+  score?: number;
+  feedback?: string; // Overall AI/Teacher feedback
+  questionFeedback?: Record<number, string>; // Specific feedback per question
+  questionScores?: Record<number, number>; // Individual question scores
+  status: 'PENDING' | 'GRADED' | 'RETURNED'; // RETURNED means sent to student
+  autoSubmitted?: boolean;
+  
+  // Two-way feedback fields
+  studentQuery?: string;
+  queryStatus?: 'OPEN' | 'RESOLVED';
+  teacherComments?: string; // For the student query response
+}
+
+export interface Assignment {
+  id: string;
+  title: string;
+  description: string; // "Assignment Description" / Instructions
+  category: 'ASSIGNMENT' | 'TEST';
+  classroomId?: string; // Optional because drafts might not have one yet
+  dueDate: string;
+  status: 'DRAFT' | 'PUBLISHED' | 'CLOSED';
+  type: 'AI' | 'MANUAL';
+  questions: Question[];
+  submissions: AssignmentSubmission[];
+  
+  // Advanced fields
+  subject?: string;
+  grades?: number[];
+  totalMarks?: number;
+  durationMinutes?: number;
+  topicPrompt?: string; // Store prompt but don't show to student
+}
+
+export interface ClassroomSettings {
+  expiryDate?: string;
+  joinLimit?: number;
+  requiresApproval: boolean;
+}
+
+export interface Classroom {
+  id: string;
+  name: string;
+  subject: string;
+  teacherId: string;
+  studentIds: string[];
+  code: string;
+  // Invite Link Features
+  inviteLink?: string;
+  isLinkActive?: boolean;
+  settings?: ClassroomSettings;
 }
 
 export interface TestSettings {
@@ -190,12 +224,14 @@ export interface TestData {
   title: string;
   subject: string;
   creatorId: string;
-  assignedClassId?: string; // New: Link to a classroom
-  assignedClassName?: string; // New: Display name
+  assignedClassId?: string; // Deprecated in favor of array, keeping for compat
+  assignedClassIds?: string[]; // New: Support multiple classes
+  assignedClassName?: string; // Deprecated
   questions: Question[];
   settings: TestSettings;
   status: 'DRAFT' | 'LIVE' | 'ENDED';
   accessCode?: string; // For students to join live
+  resultsPublished?: boolean; // New: Teacher has announced results
 }
 
 export interface TestResult {

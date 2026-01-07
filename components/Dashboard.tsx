@@ -10,9 +10,13 @@ import {
 interface DashboardProps {
   user: User;
   changeView: (view: AppView) => void;
+  stats?: {
+      liveTests: number;
+      activeClasses: number;
+  };
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ user, changeView }) => {
+const Dashboard: React.FC<DashboardProps> = ({ user, changeView, stats }) => {
   
   // STUDENT DASHBOARD CONFIG
   const studentStats = [
@@ -32,8 +36,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, changeView }) => {
 
   // TEACHER DASHBOARD CONFIG
   const teacherStats = [
-      { label: 'Active Classes', value: '4', icon: Users, color: 'text-purple-600 bg-purple-50' },
-      { label: 'Live Tests', value: '1 Active', icon: PlayCircle, color: 'text-red-600 bg-red-50' },
+      { label: 'Active Classes', value: stats ? stats.activeClasses.toString() : '4', icon: Users, color: 'text-purple-600 bg-purple-50' },
+      { label: 'Live Tests', value: stats ? `${stats.liveTests} Active` : '1 Active', icon: PlayCircle, color: 'text-red-600 bg-red-50' },
       { label: 'Pending Reviews', value: '12', icon: CheckSquare, color: 'text-orange-600 bg-orange-50' },
   ];
 
@@ -100,7 +104,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, changeView }) => {
   }, [user.role]);
 
   const buttons = user.role === UserRole.TEACHER ? teacherButtons : studentButtons;
-  const stats = user.role === UserRole.TEACHER ? teacherStats : studentStats;
+  const statsList = user.role === UserRole.TEACHER ? teacherStats : studentStats;
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
@@ -128,7 +132,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, changeView }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
           {/* Stats Column */}
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
-            {stats.map((stat, idx) => {
+            {statsList.map((stat, idx) => {
                 const Icon = stat.icon;
                 return (
                     <div key={idx} className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex items-center gap-4 transition-transform hover:-translate-y-1 h-32">

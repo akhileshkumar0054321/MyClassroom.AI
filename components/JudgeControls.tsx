@@ -29,15 +29,7 @@ const JudgeControls: React.FC<JudgeControlsProps> = ({ onLogout, onReset, onLoad
     }
 
     if (!isOpen) {
-        return (
-            <button 
-                onClick={() => setIsOpen(true)}
-                className="fixed bottom-6 left-6 z-50 bg-black text-white p-3 rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center gap-2 border-2 border-yellow-400"
-            >
-                <Settings className="w-6 h-6 animate-spin-slow" />
-                <span className="text-xs font-bold hidden md:block">JUDGE PANEL</span>
-            </button>
-        )
+        return null;
     }
 
     return (
@@ -100,7 +92,7 @@ const JudgeControls: React.FC<JudgeControlsProps> = ({ onLogout, onReset, onLoad
                                 onClick={handleGenerateScript}
                                 disabled={loadingScript}
                                 className="text-xs bg-black dark:bg-white dark:text-black text-white px-3 py-1 rounded-full flex items-center gap-1 hover:opacity-80"
-                             >
+                            >
                                 {loadingScript ? <Loader2 className="w-3 h-3 animate-spin"/> : 'Generate Script'}
                              </button>
                         </div>
