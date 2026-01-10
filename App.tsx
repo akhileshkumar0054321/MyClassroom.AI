@@ -12,6 +12,7 @@ import EbookGenerator from './components/EbookGenerator';
 import NotesGenerator from './components/NotesGenerator';
 import PPTGenerator from './components/PPTGenerator';
 import TestManager from './components/TestManager';
+import ExaminationCenter from './components/ExaminationCenter';
 import DoubtTutor from './components/DoubtTutor';
 import LearningPathBuilder from './components/LearningPathBuilder';
 import ClassroomManager from './components/ClassroomManager';
@@ -25,7 +26,7 @@ import OnboardingTour from './components/OnboardingTour';
 import { generateCareerPath } from './services/gemini';
 import { 
     Bell, X, LogIn, UserCircle, GraduationCap, Briefcase, 
-    Beaker, Loader2, Play, CheckCircle, Sparkles, ShieldAlert, FileText
+    Beaker, Loader2, Play, CheckCircle, Sparkles, ShieldAlert, FileText, ShieldCheck, Shield
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -106,7 +107,16 @@ const INITIAL_TESTS: TestData[] = [
              { id: 1, text: 'What pigment is responsible for green color in plants?', type: QuestionType.MCQ, options: ['Chlorophyll', 'Xanthophyll', 'Carotene', 'Anthocyanin'], correctAnswer: 'Chlorophyll', difficulty: 'Easy', explanation: 'Chlorophyll absorbs light.' },
              { id: 2, text: 'Where does the light-dependent reaction take place?', type: QuestionType.MCQ, options: ['Stroma', 'Thylakoid', 'Mitochondria', 'Nucleus'], correctAnswer: 'Thylakoid', difficulty: 'Medium', explanation: 'Thylakoid membranes contain the photosystems.' }
         ],
-        settings: { timeLimitMinutes: 10, proctoring: true, adaptive: false, shuffleQuestions: true }
+        settings: { 
+            timeLimitMinutes: 10, 
+            proctoring: true, 
+            requireWebcam: true, 
+            preventTabSwitch: true,
+            allowCalculator: false,
+            allowInternet: false,
+            adaptive: false, 
+            shuffleQuestions: true 
+        }
     }
 ];
 
@@ -115,6 +125,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.LOGIN);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showExamSelector, setShowExamSelector] = useState(false);
   
   // Data Stores
   const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
@@ -137,12 +148,29 @@ const App: React.FC = () => {
       const u = role === UserRole.TEACHER ? MOCK_TEACHER : MOCK_STUDENT;
       setUser(u);
       setView(AppView.DASHBOARD);
-      // Determine if onboarding is needed (mock logic)
       if (!localStorage.getItem('onboarding_done')) {
           setOnboardingComplete(false);
       } else {
           setOnboardingComplete(true);
       }
+  };
+
+  const handleGuestExamLogin = (role: UserRole) => {
+    const guestUser: User = {
+        id: `GUEST-${Math.floor(Math.random()*10000)}`,
+        name: role === UserRole.TEACHER ? 'Guest Invigilator' : 'Guest Student',
+        email: 'guest@myclassroom.ai',
+        role: role,
+        preferences: { language: 'English', gradeLevel: '10', style: 'Visual' },
+        profile: { ...MOCK_PROFILE, school: 'Examination Hall' },
+        friends: []
+    };
+    setUser(guestUser);
+    setView(AppView.EXAMINATION);
+    setShowExamSelector(false);
+    if (!localStorage.getItem('onboarding_done')) {
+        setOnboardingComplete(true); // Skip onboarding for immediate exam guests
+    }
   };
 
   const handleEmailLogin = (e: React.FormEvent) => {
@@ -154,7 +182,6 @@ const App: React.FC = () => {
     setIsLoggingIn(true);
     setTimeout(() => {
         setIsLoggingIn(false);
-        // Create a mock user based on email/role
         const mockUser: User = {
             id: `MC-${Math.floor(Math.random()*10000)}`,
             name: loginEmail.split('@')[0],
@@ -177,6 +204,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
       setUser(null);
       setView(AppView.LOGIN);
+      setShowExamSelector(false);
   };
 
   const addNotification = (title: string, message: string, type: 'INFO' | 'SUCCESS' | 'ERROR' | 'EMAIL') => {
@@ -203,7 +231,6 @@ const App: React.FC = () => {
       window.location.reload();
   };
 
-  // --- RENDERERS FOR SPECIALIZED VIEWS (Virtual Lab / Career) ---
   const renderVirtualLab = () => (
       <div className="p-6 max-w-4xl mx-auto text-center h-[80vh] flex flex-col items-center justify-center">
           <div className="bg-white dark:bg-gray-800 p-10 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700">
@@ -261,9 +288,7 @@ const App: React.FC = () => {
       return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
             <div className="max-w-5xl w-full bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-2 min-h-[600px] animate-fade-in">
-                {/* Left Side - Branding */}
                 <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-12 text-white flex flex-col justify-between relative overflow-hidden">
-                    {/* Background Pattern */}
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
                     
                     <div className="relative z-10">
@@ -301,25 +326,33 @@ const App: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Right Side - Login Form */}
                 <div className="p-12 flex flex-col justify-center bg-white dark:bg-gray-800">
                     <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Get Started</h2>
                     <p className="text-gray-500 mb-8">Select your role to access the dashboard.</p>
 
-                    <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="grid grid-cols-3 gap-4 mb-6">
                         <button 
                             onClick={() => setLoginRole(UserRole.STUDENT)}
                             className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.STUDENT ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'}`}
                         >
                             <UserCircle className="w-8 h-8" />
-                            <span className="font-bold dark:text-white">Student</span>
+                            <span className="font-bold dark:text-white text-sm">Student</span>
                         </button>
+                        
+                        <button 
+                            onClick={() => setShowExamSelector(true)}
+                            className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 flex flex-col items-center gap-2 transition-all hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 group"
+                        >
+                            <ShieldCheck className="w-8 h-8 text-gray-400 group-hover:text-red-500" />
+                            <span className="font-bold dark:text-white text-sm">Examination</span>
+                        </button>
+
                         <button 
                             onClick={() => setLoginRole(UserRole.TEACHER)}
                             className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.TEACHER ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'}`}
                         >
                             <GraduationCap className="w-8 h-8" />
-                            <span className="font-bold dark:text-white">Teacher</span>
+                            <span className="font-bold dark:text-white text-sm">Teacher</span>
                         </button>
                     </div>
 
@@ -362,6 +395,46 @@ const App: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* EXAMINATION ROLE SELECTOR MODAL */}
+            {showExamSelector && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+                    <div className="bg-white dark:bg-gray-800 rounded-[2.5rem] shadow-2xl w-full max-w-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div className="p-8 flex justify-between items-center border-b dark:border-gray-700">
+                            <h3 className="text-2xl font-black dark:text-white">Examination Portal: Choose Your Role</h3>
+                            <button onClick={() => setShowExamSelector(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><X className="w-6 h-6 dark:text-white"/></button>
+                        </div>
+                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* INVIGILATOR OPTION */}
+                            <button 
+                                onClick={() => handleGuestExamLogin(UserRole.TEACHER)}
+                                className="flex flex-col items-center p-8 rounded-[2rem] border-2 border-gray-100 dark:border-gray-700 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all text-center group"
+                            >
+                                <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/40 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                    <ShieldCheck className="w-10 h-10 text-indigo-600" />
+                                </div>
+                                <h4 className="text-xl font-bold dark:text-white mb-2">Invigilator</h4>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Generate tests with AI, manage questions manually, and monitor the live hall.</p>
+                            </button>
+
+                            {/* STUDENT OPTION */}
+                            <button 
+                                onClick={() => handleGuestExamLogin(UserRole.STUDENT)}
+                                className="flex flex-col items-center p-8 rounded-[2rem] border-2 border-gray-100 dark:border-gray-700 hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-center group"
+                            >
+                                <div className="w-20 h-20 bg-red-100 dark:bg-red-900/40 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                    <GraduationCap className="w-10 h-10 text-red-600" />
+                                </div>
+                                <h4 className="text-xl font-bold dark:text-white mb-2">Student</h4>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Join a proctored hall via unique access code and submit your responses.</p>
+                            </button>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-gray-900/50 p-6 text-center">
+                            <p className="text-xs text-gray-400">Guest sessions utilize AI-proctoring and real-time response capture.</p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
       );
   }
@@ -376,7 +449,6 @@ const App: React.FC = () => {
       />
       
       <main className="flex-1 ml-64 relative">
-         {/* NOTIFICATION TOASTS */}
          <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2">
              {notifications.map(n => (
                  <div key={n.id} className={`p-4 rounded-lg shadow-xl flex items-center gap-3 animate-slide-in min-w-[300px] ${
@@ -405,7 +477,6 @@ const App: React.FC = () => {
             }}
          />
 
-         {/* VIEW ROUTER */}
          {view === AppView.DASHBOARD && <Dashboard user={user} changeView={setView} />}
          {view === AppView.VIDEO_GEN && <VideoGenerator onSave={(script) => { setLibrary(prev => [...prev, { id: Date.now().toString(), type: ContentType.VIDEO, title: script.topic, data: script, dateCreated: new Date().toISOString(), userId: user.id, status: 'ACTIVE', isShared: false, views: 0, imports: 0 }]); addNotification('Video Saved', 'Saved to My Library', 'SUCCESS'); }} />}
          {view === AppView.EBOOK_GEN && <EbookGenerator onSave={(title, content) => { setLibrary(prev => [...prev, { id: Date.now().toString(), type: ContentType.EBOOK, title, data: content, dateCreated: new Date().toISOString(), userId: user.id, status: 'ACTIVE', isShared: false, views: 0, imports: 0 }]); addNotification('Ebook Saved', 'Saved to My Library', 'SUCCESS'); }} />}
@@ -428,6 +499,12 @@ const App: React.FC = () => {
                     addNotification('Results Published', 'Students can now view their scores', 'SUCCESS');
                 }}
                 onExit={() => setView(AppView.DASHBOARD)}
+         />}
+         {view === AppView.EXAMINATION && <ExaminationCenter 
+            user={user}
+            globalTests={tests}
+            onAddTest={(t) => setTests([...tests, t])}
+            onSaveResult={(r) => { setTestResults([...testResults, r]); addNotification('Public Exam Submitted', 'Result Saved', 'SUCCESS'); }}
          />}
          {view === AppView.DOUBT_TUTOR && <DoubtTutor />}
          {view === AppView.LEARNING_PATH && <LearningPathBuilder />}

@@ -1,10 +1,9 @@
 
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { VideoScript, TestData, LearningPath, Presentation, QuestionType, DoubtResponse, Question, AssignmentSubmission } from "../types";
 
+// Helper to get GoogleGenAI client with correct initialization
 const getClient = async (useVeo: boolean = false) => {
-  let apiKey = process.env.API_KEY;
-  
   if (useVeo) {
     const win = window as any;
     if (win.aistudio && typeof win.aistudio.hasSelectedApiKey === 'function' && await win.aistudio.hasSelectedApiKey()) {
@@ -14,12 +13,13 @@ const getClient = async (useVeo: boolean = false) => {
     }
   }
 
-  return new GoogleGenAI({ apiKey: apiKey });
+  // Always use process.env.API_KEY directly as required by guidelines
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 // --- PROCTORING AGENT ---
 export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ suspicious: boolean, reason: string }> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `
     Analyze this webcam frame of a student taking an online exam. STRICT PROCTORING MODE.
     
@@ -36,7 +36,7 @@ export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ sus
     Return JSON.
   `;
 
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       suspicious: { type: Type.BOOLEAN },
@@ -46,8 +46,8 @@ export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ sus
   };
 
   try {
-      const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
         contents: {
             parts: [
                 { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
@@ -68,7 +68,7 @@ export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ sus
 
 // --- VIDEO ---
 export const generateVideoScript = async (topic: string, duration: number, language: string, style: string): Promise<VideoScript> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `
     Create an educational video script for: "${topic}".
     Target Duration: ${duration} minutes. Language: ${language}.
@@ -79,7 +79,7 @@ export const generateVideoScript = async (topic: string, duration: number, langu
     Return JSON.
   `;
 
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       topic: { type: Type.STRING },
@@ -106,8 +106,8 @@ export const generateVideoScript = async (topic: string, duration: number, langu
     required: ["topic", "totalDuration", "chapters", "summary", "anticipatedQuestions"]
   };
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -120,8 +120,8 @@ export const generateVideoScript = async (topic: string, duration: number, langu
 
 export const generateVeoPreview = async (prompt: string): Promise<string | null> => {
   try {
-    const client = await getClient(true); 
-    let operation = await client.models.generateVideos({
+    const ai = await getClient(true); 
+    let operation = await ai.models.generateVideos({
       model: 'veo-3.1-fast-generate-preview',
       prompt: `Educational animation: ${prompt}, clear visibility, 4k, photorealistic or animated style.`,
       config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '16:9' }
@@ -129,7 +129,7 @@ export const generateVeoPreview = async (prompt: string): Promise<string | null>
 
     while (!operation.done) {
       await new Promise(resolve => setTimeout(resolve, 5000));
-      operation = await client.operations.getVideosOperation({ operation: operation });
+      operation = await ai.operations.getVideosOperation({ operation: operation });
     }
 
     const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
@@ -142,10 +142,10 @@ export const generateVeoPreview = async (prompt: string): Promise<string | null>
 
 // --- EBOOK ---
 export const generateEbookContentStream = async (topic: string, onChunk: (text: string) => void) => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Write a multi-chapter ebook on: "${topic}". Include TOC, 3 Chapters, Summary. Format: Markdown.`;
-  const stream = await client.models.generateContentStream({
-    model: 'gemini-2.5-flash',
+  const stream = await ai.models.generateContentStream({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
   });
   for await (const chunk of stream) {
@@ -155,10 +155,10 @@ export const generateEbookContentStream = async (topic: string, onChunk: (text: 
 
 // --- NOTES ---
 export const generateNotes = async (topic: string, detailLevel: string): Promise<string> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Create revision notes for "${topic}". Level: ${detailLevel}. Markdown format. Include Key Concepts, Mnemonics, Formulas.`;
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
   });
   return response.text || "";
@@ -166,10 +166,10 @@ export const generateNotes = async (topic: string, detailLevel: string): Promise
 
 // --- PPT ---
 export const generatePPT = async (topic: string, slideCount: number): Promise<Presentation> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Create a presentation on "${topic}" with ${slideCount} slides. Return JSON.`;
   
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       topic: { type: Type.STRING },
@@ -190,8 +190,8 @@ export const generatePPT = async (topic: string, slideCount: number): Promise<Pr
     required: ["topic", "slides"]
   };
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: { responseMimeType: "application/json", responseSchema: schema }
   });
@@ -209,7 +209,7 @@ export const generateAssignmentFromPrompt = async (
     type: QuestionType, 
     marks: number
 ): Promise<Question[]> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `
     You are an AI Assignment Generator Agent.
     User Request: "${userPrompt}"
@@ -226,7 +226,7 @@ export const generateAssignmentFromPrompt = async (
     Return JSON array.
   `;
 
-  const schema: Schema = {
+  const schema = {
     type: Type.ARRAY,
     items: {
       type: Type.OBJECT,
@@ -245,8 +245,8 @@ export const generateAssignmentFromPrompt = async (
     }
   };
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: { responseMimeType: "application/json", responseSchema: schema }
   });
@@ -260,7 +260,7 @@ export const evaluateSubmission = async (
     questions: Question[], 
     answers: Record<number, string>
 ): Promise<{ score: number, feedback: string, questionScores: Record<number, number>, questionFeedback: Record<number, string> }> => {
-    const client = await getClient();
+    const ai = await getClient();
     
     // Prepare context
     const context = questions.map(q => ({
@@ -288,31 +288,11 @@ export const evaluateSubmission = async (
         Return JSON.
     `;
 
-    const schema: Schema = {
-        type: Type.OBJECT,
-        properties: {
-            score: { type: Type.NUMBER },
-            feedback: { type: Type.STRING },
-            questionScores: {
-                type: Type.OBJECT,
-                properties: {}, // Map of number -> number
-            },
-            questionFeedback: {
-                type: Type.OBJECT,
-                properties: {}, // Map of number -> string
-            }
-        },
-        required: ["score", "feedback"]
-    };
-
-    const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
         contents: prompt,
         config: { 
             responseMimeType: "application/json",
-            // Note: Strict Map typing in schema for dynamic keys is complex in basic schema, 
-            // so we rely on the model to return the expected structure based on the prompt instructions.
-            // Simplified schema to ensure basic structure.
         }
     });
 
@@ -331,7 +311,7 @@ export const generateClassReport = async (
     questions: Question[],
     title: string
 ): Promise<string> => {
-    const client = await getClient();
+    const ai = await getClient();
     
     // Anonymize and summarize for analysis
     const summaryData = submissions.map(s => ({
@@ -366,8 +346,8 @@ export const generateClassReport = async (
         Format as a professional, clean Markdown report. Use emojis for section headers.
     `;
 
-    const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
         contents: prompt
     });
 
@@ -381,10 +361,10 @@ export const generateAssignmentQuestions = async (topic: string, count: number, 
 
 // --- TEST ---
 export const generateTest = async (topic: string, difficulty: string, count: number): Promise<TestData> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Generate a test on "${topic}". Difficulty: ${difficulty}. Questions: ${count}. Mix of MCQ and Short answer. Return JSON.`;
 
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       title: { type: Type.STRING },
@@ -409,20 +389,33 @@ export const generateTest = async (topic: string, difficulty: string, count: num
     required: ["title", "subject", "questions"]
   };
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: { responseMimeType: "application/json", responseSchema: schema }
   });
 
   const data = JSON.parse(response.text || "{}");
-  return { ...data, id: Date.now().toString(), settings: { timeLimitMinutes: 30, proctoring: false, adaptive: false, shuffleQuestions: false } } as TestData;
+  // Fix: Added missing properties to TestSettings within the return object to satisfy the interface.
+  return { 
+    ...data, 
+    id: Date.now().toString(), 
+    settings: { 
+      timeLimitMinutes: 30, 
+      proctoring: false, 
+      requireWebcam: false,
+      preventTabSwitch: false,
+      allowCalculator: false,
+      allowInternet: false,
+      adaptive: false, 
+      shuffleQuestions: false 
+    } 
+  } as TestData;
 };
 
 // --- DOUBT ---
 export const resolveDoubt = async (question: string, imageBase64?: string): Promise<DoubtResponse> => {
-  const client = await getClient();
-  const model = 'gemini-2.5-flash';
+  const ai = await getClient();
   
   const promptText = `
     You are a helpful educational tutor.
@@ -441,7 +434,7 @@ export const resolveDoubt = async (question: string, imageBase64?: string): Prom
     });
   }
 
-  const schema: Schema = {
+  const schema = {
       type: Type.OBJECT,
       properties: {
           answer: { type: Type.STRING },
@@ -451,8 +444,8 @@ export const resolveDoubt = async (question: string, imageBase64?: string): Prom
       required: ["answer", "isAcademic", "relatedQuestions"]
   };
 
-  const response = await client.models.generateContent({
-    model,
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { 
         responseMimeType: "application/json",
@@ -465,10 +458,10 @@ export const resolveDoubt = async (question: string, imageBase64?: string): Prom
 
 // --- LEARNING PATH ---
 export const generateLearningPath = async (goal: string): Promise<LearningPath> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Create a 5-day learning plan to achieve: "${goal}". Return JSON.`;
   
-  const schema: Schema = {
+  const schema = {
     type: Type.OBJECT,
     properties: {
       goal: { type: Type.STRING },
@@ -488,8 +481,8 @@ export const generateLearningPath = async (goal: string): Promise<LearningPath> 
     required: ["goal", "schedule"]
   };
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: { responseMimeType: "application/json", responseSchema: schema }
   });
@@ -499,10 +492,10 @@ export const generateLearningPath = async (goal: string): Promise<LearningPath> 
 
 // --- CAREER PATH ---
 export const generateCareerPath = async (interests: string): Promise<string> => {
-  const client = await getClient();
+  const ai = await getClient();
   const prompt = `Suggest 3 career paths based on these interests/skills: "${interests}". Include required skills and college major. Markdown format.`;
-  const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
     contents: prompt,
   });
   return response.text || "";
@@ -510,10 +503,10 @@ export const generateCareerPath = async (interests: string): Promise<string> => 
 
 // --- DEMO SCRIPT ---
 export const generateDemoScript = async (role: string): Promise<string> => {
-    const client = await getClient();
+    const ai = await getClient();
     const prompt = `Write a short 30-second demo script for a ${role} presenting the MyClassroom AI App. Highlight 3 key features (AI Tests, Proctoring, Learning Path). Format as bullet points.`;
-    const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
         contents: prompt
     });
     return response.text || "";

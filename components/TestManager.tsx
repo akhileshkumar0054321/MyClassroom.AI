@@ -92,7 +92,17 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
           title: manualTitle,
           subject: 'General',
           creatorId: user.id,
-          settings: { timeLimitMinutes: 30, proctoring: true, adaptive: false, shuffleQuestions: false },
+          // Fix: Added missing properties to TestSettings within saveManualTest to satisfy the interface definition.
+          settings: { 
+            timeLimitMinutes: 30, 
+            proctoring: true, 
+            requireWebcam: true, 
+            preventTabSwitch: true, 
+            allowCalculator: false, 
+            allowInternet: false, 
+            adaptive: false, 
+            shuffleQuestions: false 
+          },
           status: 'DRAFT',
           accessCode: Math.floor(100000 + Math.random() * 900000).toString(),
           questions: manualQuestions.map((q, i) => ({

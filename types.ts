@@ -6,6 +6,7 @@ export enum AppView {
   NOTES_GEN = 'NOTES_GEN',
   PPT_GEN = 'PPT_GEN',
   TEST_MANAGER = 'TEST_MANAGER',
+  EXAMINATION = 'EXAMINATION',
   DOUBT_TUTOR = 'DOUBT_TUTOR',
   LEARNING_PATH = 'LEARNING_PATH',
   CLASSROOMS = 'CLASSROOMS',
@@ -139,7 +140,9 @@ export enum QuestionType {
   FILL_BLANKS = 'FILL_BLANKS',
   TRUE_FALSE = 'TRUE_FALSE',
   ORAL = 'ORAL',
-  NUMERICAL = 'NUMERICAL'
+  NUMERICAL = 'NUMERICAL',
+  ESSAY = 'ESSAY',
+  MATCHING = 'MATCHING'
 }
 
 export interface Question {
@@ -150,7 +153,7 @@ export interface Question {
   correctAnswer?: string;
   modelAnswer?: string; // For subjective/long answers
   explanation: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
+  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
   marks?: number;
 }
 
@@ -215,23 +218,29 @@ export interface Classroom {
 export interface TestSettings {
   timeLimitMinutes: number;
   proctoring: boolean;
+  requireWebcam: boolean;
+  preventTabSwitch: boolean;
+  allowCalculator: boolean;
+  allowInternet: boolean;
   adaptive: boolean;
   shuffleQuestions: boolean;
 }
+
+export type TestStatus = 'DRAFT' | 'LIVE' | 'ENDED' | 'COMPLETED';
 
 export interface TestData {
   id: string;
   title: string;
   subject: string;
   creatorId: string;
-  assignedClassId?: string; // Deprecated in favor of array, keeping for compat
-  assignedClassIds?: string[]; // New: Support multiple classes
-  assignedClassName?: string; // Deprecated
+  assignedClassId?: string; 
+  assignedClassIds?: string[];
   questions: Question[];
   settings: TestSettings;
-  status: 'DRAFT' | 'LIVE' | 'ENDED';
-  accessCode?: string; // For students to join live
-  resultsPublished?: boolean; // New: Teacher has announced results
+  status: TestStatus;
+  accessCode?: string; 
+  resultsPublished?: boolean; 
+  instructions?: string;
 }
 
 export interface TestResult {
@@ -242,9 +251,9 @@ export interface TestResult {
   answers: Record<number, string>;
   dateTaken: string;
   status: 'COMPLETED' | 'AWAITED';
-  violationLog?: string[]; // New: List of proctoring violations
-  warningsCount?: number;   // New: Count of warnings
-  autoSubmitted?: boolean;  // New: Was it forced?
+  violationLog?: string[]; 
+  warningsCount?: number;   
+  autoSubmitted?: boolean;  
 }
 
 // Learning Path Types
