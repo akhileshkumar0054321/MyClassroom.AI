@@ -15,6 +15,8 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, user }) => {
+  const isExamMode = user.role === UserRole.ADMIN;
+
   const commonItems = [
     { id: AppView.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
     { id: AppView.CLASSROOMS, label: 'My Classrooms', icon: Users },
@@ -52,8 +54,21 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, 
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           MyClassroom
         </h1>
-        <div className="mt-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-xs font-semibold inline-block text-gray-600 dark:text-gray-300">
-          {user.role} MODE
+        <div className="mt-2 flex flex-col gap-2">
+            <div className="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-xs font-semibold inline-block text-gray-600 dark:text-gray-300 w-fit">
+            {user.role === UserRole.ADMIN ? 'EXAM' : user.role} MODE
+            </div>
+            
+            {/* TOP LOGOUT BUTTON (Only for Exam Mode) */}
+            {isExamMode && (
+                <button 
+                    onClick={onLogout}
+                    className="flex items-center justify-center gap-2 w-full mt-2 py-2 px-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg font-bold text-sm hover:bg-red-100 transition-all shadow-sm"
+                >
+                    <LogOut className="w-4 h-4" />
+                    Log Out
+                </button>
+            )}
         </div>
       </div>
       
@@ -94,7 +109,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, 
 
           <div className="my-2 border-t border-gray-100 dark:border-gray-700"></div>
 
-          {(user.role === UserRole.TEACHER ? teacherItems : studentItems).map((item) => {
+          {(user.role === UserRole.TEACHER ? teacherItems : (user.role === UserRole.STUDENT ? studentItems : [])).map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -156,24 +171,27 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, 
         </div>
       </nav>
 
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-        <div className="flex items-center gap-3 mb-3 px-2">
-            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 flex items-center justify-center font-bold">
-                {user.name.charAt(0)}
+      {/* BOTTOM USER SECTION (Hidden in Exam Mode) */}
+      {!isExamMode && (
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+            <div className="flex items-center gap-3 mb-3 px-2">
+                <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-300 flex items-center justify-center font-bold">
+                    {user.name.charAt(0)}
+                </div>
+                <div className="overflow-hidden">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{user.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{user.id}</p>
+                </div>
             </div>
-            <div className="overflow-hidden">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{user.name}</p>
-                <p className="text-xs text-gray-500 truncate">{user.id}</p>
-            </div>
-        </div>
-        <button 
-          onClick={onLogout}
-          className="w-full flex items-center gap-3 px-4 py-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm font-medium"
-        >
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </button>
-      </div>
+            <button 
+              onClick={onLogout}
+              className="w-full flex items-center gap-3 px-4 py-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm font-medium"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </button>
+          </div>
+      )}
     </div>
   );
 };

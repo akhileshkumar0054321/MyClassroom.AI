@@ -1,310 +1,153 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { generateTest, analyzeProctoringFrame } from '../services/gemini';
-import { TestData, User, TestResult, QuestionType, UserRole, Question, TestSettings, TestStatus } from '../types';
+import { analyzeProctoringFrame } from '../services/gemini';
+import { TestResult, QuestionType, Question, User } from '../types';
 import { 
-    Play, Plus, Loader2, ShieldCheck, Hash, 
-    Copy, CheckCircle, Sparkles, Send, Mic, 
-    Camera, Eye, Activity, Clock, ShieldAlert, X, GraduationCap, 
-    Layout, Settings, Edit3, Trash2, List, CheckSquare, AlertCircle, 
-    ChevronRight, ChevronLeft, Save, Globe, Monitor, BarChart3, Info,
-    PlusCircle, FileText, Shield, User as UserIcon, Keyboard, Calculator, Search,
-    QrCode, Pause, PlayCircle, MessageSquare, AlertTriangle, ArrowRight, BookOpen,
-    Trophy, RotateCcw, Share2, Layers
+    Play, ShieldCheck, Hash, CheckCircle, Camera, Activity, 
+    Clock, ShieldAlert, ChevronRight, ChevronLeft, 
+    Shield, UserCheck, Mic, Laptop, Search, Loader2, AlertTriangle, 
+    Trophy, Monitor, LogOut, Globe, ArrowRight, PlayCircle, User as UserIcon,
+    Fingerprint, Smartphone, UserRoundCheck, Image as ImageIcon
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-// --- DEMO CONSTANT ---
-const PHYSICS_DEMO_TEST: TestData = {
-    id: 'DEMO-000000',
-    title: 'Introductory Physics Demo Test',
-    subject: 'Physics',
-    creatorId: 'SYSTEM',
-    instructions: 'This is a demo physics test. You can practice the test-taking interface here.',
-    status: 'LIVE',
-    accessCode: '000000',
-    questions: [
-        {
-            id: 1,
-            text: 'What is the SI unit of force?',
-            type: QuestionType.MCQ,
-            options: ['Joule', 'Newton', 'Watt', 'Pascal'],
-            correctAnswer: 'Newton',
-            difficulty: 'Easy',
-            explanation: 'The SI unit of force is the Newton (N), named after Isaac Newton.',
-            marks: 2
-        },
-        {
-            id: 2,
-            text: 'Which law states that every action has an equal and opposite reaction?',
-            type: QuestionType.MCQ,
-            options: ["Newton's First Law", "Newton's Second Law", "Newton's Third Law", "Law of Gravitation"],
-            correctAnswer: "Newton's Third Law",
-            difficulty: 'Easy',
-            explanation: "Newton's Third Law states that for every action force, there is an equal and opposite reaction force.",
-            marks: 2
-        },
-        {
-            id: 3,
-            text: 'Calculate the acceleration of a 10kg object when a force of 50N is applied.',
-            type: QuestionType.SHORT,
-            correctAnswer: '5 m/s²',
-            modelAnswer: '5 m/s²',
-            difficulty: 'Medium',
-            explanation: 'Using F = ma, a = F/m = 50N / 10kg = 5 m/s².',
-            marks: 3
-        },
-        {
-            id: 4,
-            text: 'Light travels faster in water than in air.',
-            type: QuestionType.TRUE_FALSE,
-            options: ['True', 'False'],
-            correctAnswer: 'False',
-            difficulty: 'Medium',
-            explanation: 'Light travels slower in denser media. It travels at ~3x10⁸ m/s in vacuum/air and ~2.25x10⁸ m/s in water.',
-            marks: 2
-        },
-        {
-            id: 5,
-            text: 'Explain the concept of conservation of energy with an example.',
-            type: QuestionType.ESSAY,
-            difficulty: 'Hard',
-            explanation: 'Energy cannot be created or destroyed, only transformed. Example: A pendulum converting potential energy to kinetic energy.',
-            marks: 5
-        }
-    ],
-    settings: {
-        timeLimitMinutes: 20,
-        proctoring: false, // Disabled for demo
-        requireWebcam: false,
-        preventTabSwitch: false,
-        allowCalculator: true,
-        allowInternet: false,
-        adaptive: false,
-        shuffleQuestions: false
-    }
-};
+// --- CONSTANTS ---
+const EXAM_LIST = [
+    "NISM (Capital Markets)", "NCFM", "Graduate Record Examinations (GRE)", 
+    "Test of English as a Foreign Language (TOEFL iBT)", "Graduate Management Admission Test (GMAT)", 
+    "International English Language Testing System (IELTS)", "Microsoft Certification Exams", 
+    "Amazon Web Services (AWS) Certification", "Cisco Certification Exams (CCNA)", 
+    "Cisco Certification Exams (CCNP)", "Test of Professional Skills (TOPS) & Other Corporate Hiring Tests", 
+    "Certifications by Google (Google Career Certificates)"
+];
+
+const MOCK_QUESTIONS: Question[] = [
+    { id: 1, text: "In a stock market context, what does IPO stand for?", type: QuestionType.MCQ, options: ["Internal Profit Option", "Initial Public Offering", "International Payment Order", "Investment Portfolio Overhaul"], correctAnswer: "Initial Public Offering", difficulty: "Easy", explanation: "IPO is the first time a company sells stock to the public.", marks: 2 },
+    { id: 2, text: "Which protocol is primarily used for secure communication over a computer network?", type: QuestionType.MCQ, options: ["HTTP", "FTP", "HTTPS", "SMTP"], correctAnswer: "HTTPS", difficulty: "Medium", explanation: "HTTPS encrypts communication between a browser and a server.", marks: 2 },
+    { id: 3, text: "What is the primary function of a router in a network?", type: QuestionType.MCQ, options: ["To store data", "To route packets between networks", "To provide power to devices", "To display web pages"], correctAnswer: "To route packets between networks", difficulty: "Medium", explanation: "Routers forward data packets across network boundaries.", marks: 2 },
+    { id: 4, text: "Cloud computing 'AWS' stands for what?", type: QuestionType.MCQ, options: ["Advanced Web Systems", "Amazon Web Services", "Apple Web Software", "Apex Wireless Solutions"], correctAnswer: "Amazon Web Services", difficulty: "Easy", explanation: "AWS is Amazon's cloud platform.", marks: 2 },
+    { id: 5, text: "What is the standard port for SSH?", type: QuestionType.MCQ, options: ["21", "22", "80", "443"], correctAnswer: "22", difficulty: "Hard", explanation: "SSH typically uses port 22.", marks: 2 }
+];
+
+type PortalPhase = 'WELCOME' | 'VERIFY_APP' | 'IDENTITY_CAPTURE' | 'MATCHING' | 'INSTRUCTIONS' | 'ARENA' | 'SUBMITTING' | 'RESULT' | 'BLOCKED';
 
 interface ExaminationCenterProps {
     user: User;
-    globalTests: TestData[];
-    onAddTest: (test: TestData) => void;
     onSaveResult: (result: TestResult) => void;
+    onLogout: () => void; 
+    globalTests?: any;
+    onAddTest?: any;
 }
 
-const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, globalTests, onAddTest, onSaveResult }) => {
-    // --- NAVIGATION ---
-    const [view, setView] = useState<'HUB' | 'INV_STEP1' | 'INV_STEP2' | 'INV_STEP3' | 'INV_DASHBOARD' | 'INV_MONITOR' | 'STU_ENTRY' | 'STU_LOBBY' | 'STU_ARENA' | 'STU_SUBMITTING' | 'STU_RESULTS'>('HUB');
+const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResult, onLogout }) => {
+    const [phase, setPhase] = useState<PortalPhase>('WELCOME');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedExam, setSelectedExam] = useState('');
     
-    // --- INVIGILATOR STATE ---
-    const [creationMethod, setCreationMethod] = useState<'AI' | 'MANUAL'>('AI');
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [workingTest, setWorkingTest] = useState<Partial<TestData>>({
-        title: '',
-        subject: '',
-        instructions: 'Follow all instructions carefully. AI proctoring is enabled.',
-        questions: [],
-        settings: {
-            timeLimitMinutes: 30,
-            proctoring: true,
-            requireWebcam: true,
-            preventTabSwitch: true,
-            allowCalculator: false,
-            allowInternet: false,
-            adaptive: false,
-            shuffleQuestions: true
-        }
-    });
-    const [aiConfig, setAiConfig] = useState({
-        topic: '',
-        count: 5,
-        difficulty: 'Medium' as 'Easy' | 'Medium' | 'Hard' | 'Mixed',
-        distributions: { MCQ: 60, TF: 20, SHORT: 10, ESSAY: 10 }
-    });
-    const [activeEditIdx, setActiveEditIdx] = useState<number | null>(null);
-    const [generatedCode, setGeneratedCode] = useState('');
-    const [copied, setCopied] = useState(false);
+    // Multi-Step Verification States
+    const [verificationStep, setVerificationStep] = useState(1);
+    const [candidateName, setCandidateName] = useState('');
+    const [dob, setDob] = useState('');
+    const [aadhaar, setAadhaar] = useState('');
+    const [otp, setOtp] = useState('');
+    const [otpTimer, setOtpTimer] = useState(0);
+    const [isOtpVerified, setIsOtpVerified] = useState(false);
+    const [appNumber, setAppNumber] = useState('');
+    const [fetchedCandidate, setFetchedCandidate] = useState<any>(null);
+    const [isVerifying, setIsVerifying] = useState(false);
+    
+    // Identity State
+    const [captures, setCaptures] = useState<{ front: string | null; left: string | null; right: string | null }>({ front: null, left: null, right: null });
+    const [matchingStatus, setMatchingStatus] = useState<'idle' | 'processing' | 'matched' | 'failed'>('idle');
 
-    // --- STUDENT STATE ---
-    const [joinCode, setJoinCode] = useState('');
-    const [activeTest, setActiveTest] = useState<TestData | null>(null);
-    const [answers, setAnswers] = useState<Record<number, string>>({});
-    const [timeLeft, setTimeLeft] = useState(0);
-    const [warnings, setWarnings] = useState(0);
-    const [audioLevel, setAudioLevel] = useState(0);
-    const [proctorStatus, setProctorStatus] = useState('Monitoring');
+    // Exam Arena State
     const [currentQIdx, setCurrentQIdx] = useState(0);
-    const [isCodeValidating, setIsCodeValidating] = useState(false);
-    const [isDemoMode, setIsDemoMode] = useState(false);
-    const [showExplanations, setShowExplanations] = useState(false);
+    const [answers, setAnswers] = useState<Record<number, string>>({});
+    const [timeLeft, setTimeLeft] = useState(600); // 10 mins
+    const [warnings, setWarnings] = useState(0);
+    const [proctorStatus, setProctorStatus] = useState('Monitoring');
+    const [aiWarning, setAiWarning] = useState<string | null>(null);
+    const [terminationMessage, setTerminationMessage] = useState<string | null>(null);
 
-    // --- REFS ---
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const lastViolationRef = useRef<number>(0);
 
-    // --- HANDLERS: INVIGILATOR ---
+    // Filtered Exams
+    const filteredExams = EXAM_LIST.filter(e => e.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const handleGenerateAI = async () => {
-        if (!aiConfig.topic) return;
-        setIsGenerating(true);
-        try {
-            const data = await generateTest(aiConfig.topic, aiConfig.difficulty, aiConfig.count);
-            setWorkingTest(prev => ({
-                ...prev,
-                title: data.title || `${aiConfig.topic} Examination`,
-                subject: aiConfig.topic,
-                questions: data.questions
-            }));
-            setView('INV_STEP2');
-        } catch (e) {
-            alert("AI generation failed. Please try again.");
-        } finally {
-            setIsGenerating(false);
+    // OTP Timer Effect
+    useEffect(() => {
+        let interval: any;
+        if (otpTimer > 0) {
+            interval = setInterval(() => setOtpTimer(p => p - 1), 1000);
         }
-    };
+        return () => clearInterval(interval);
+    }, [otpTimer]);
 
-    const addManualQuestion = () => {
-        const newQ: Question = {
-            id: Date.now(),
-            text: '',
-            type: QuestionType.MCQ,
-            options: ['', '', '', ''],
-            correctAnswer: '',
-            explanation: '',
-            difficulty: 'Medium',
-            marks: 1
-        };
-        setWorkingTest(prev => ({
-            ...prev,
-            questions: [...(prev.questions || []), newQ]
-        }));
-        setActiveEditIdx((workingTest.questions?.length || 0));
-    };
-
-    const finalizeTestCreation = () => {
-        if (!workingTest.title || (workingTest.questions?.length || 0) === 0) {
-            alert("Please provide a title and at least one question.");
-            return;
-        }
-        // Format: PHY-7B3K-9D2M style
-        const code = `PHY-${Math.random().toString(36).substring(2,6).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`;
-        const newTest: TestData = {
-            ...workingTest as TestData,
-            id: Date.now().toString(),
-            creatorId: user.id,
-            status: 'LIVE',
-            accessCode: code,
-            resultsPublished: false
-        };
-        onAddTest(newTest);
-        setGeneratedCode(code);
-        setView('INV_DASHBOARD');
-    };
-
-    // --- Fix: Added missing deleteQuestion function ---
-    const deleteQuestion = (index: number) => {
-        setWorkingTest(prev => ({
-            ...prev,
-            questions: prev.questions?.filter((_, i) => i !== index)
-        }));
-    };
-
-    // --- HANDLERS: STUDENT ---
-
-    const validateJoinCode = () => {
-        setIsCodeValidating(true);
-        setTimeout(() => {
-            if (joinCode === '000000') {
-                setIsDemoMode(true);
-                setActiveTest(PHYSICS_DEMO_TEST);
-                setView('STU_LOBBY');
-            } else {
-                const test = globalTests.find(t => t.accessCode === joinCode);
-                if (test) {
-                    setIsDemoMode(false);
-                    setActiveTest(test);
-                    setView('STU_LOBBY');
-                } else {
-                    alert("Invalid code. Please check and try again.");
-                }
+    // --- HARDWARE KILLSWITCH & CLEANUP ---
+    useEffect(() => {
+        const monitoringPhases: PortalPhase[] = ['IDENTITY_CAPTURE', 'MATCHING', 'ARENA'];
+        if (!monitoringPhases.includes(phase)) {
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current = null;
             }
-            setIsCodeValidating(false);
-        }, 1200);
-    };
-
-    // --- Fix: Added missing startStudentArena function ---
-    const startStudentArena = async () => {
-        if (!activeTest) return;
-        
-        if (activeTest.settings.requireWebcam && !isDemoMode) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
-                streamRef.current = stream;
-                
-                // Initialize audio analysis if needed
-                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-                if (!audioContextRef.current) {
-                    audioContextRef.current = new AudioContext();
-                    analyserRef.current = audioContextRef.current.createAnalyser();
-                    const source = audioContextRef.current.createMediaStreamSource(stream);
-                    source.connect(analyserRef.current);
-                }
-            } catch (e) {
-                alert("Camera and Microphone permissions are required for this proctored examination.");
-                return;
+            if (audioContextRef.current) {
+                audioContextRef.current.close().catch(() => {});
+                audioContextRef.current = null;
             }
         }
-        
-        setTimeLeft((activeTest.settings.timeLimitMinutes || 20) * 60);
-        setCurrentQIdx(0);
-        setAnswers({});
-        setWarnings(0);
-        setView('STU_ARENA');
-    };
+    }, [phase]);
 
-    const submitStudentExam = (auto = false) => {
-        setView('STU_SUBMITTING');
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-        
-        setTimeout(() => {
-            let correct = 0;
-            activeTest?.questions.forEach(q => {
-                if (q.type === QuestionType.MCQ || q.type === QuestionType.TRUE_FALSE) {
-                    if (answers[q.id] === q.correctAnswer) correct++;
-                } else if (q.type === QuestionType.SHORT) {
-                    if (answers[q.id]?.trim().toLowerCase() === q.correctAnswer?.trim().toLowerCase()) correct++;
-                }
-            });
+    useEffect(() => {
+        return () => {
+            if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+            if (audioContextRef.current) audioContextRef.current.close().catch(() => {});
+        };
+    }, []);
 
-            const result: TestResult = {
-                testId: activeTest?.id || 'public',
-                studentId: user.id,
-                score: correct,
-                maxScore: activeTest?.questions.length || 0,
-                answers,
-                dateTaken: new Date().toISOString(),
-                status: 'COMPLETED',
-                autoSubmitted: auto
-            };
-            onSaveResult(result);
-            confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-            setView('STU_RESULTS');
-        }, 2000);
-    };
-
-    // --- PROCTORING SYSTEM ---
+    // --- AI INVIGILATOR AGENT ---
     useEffect(() => {
         let visionInterval: any;
         let audioInterval: any;
 
-        if (view === 'STU_ARENA' && activeTest?.settings.proctoring && streamRef.current && !isDemoMode) {
-            if (videoRef.current) videoRef.current.srcObject = streamRef.current;
+        if (phase === 'ARENA' && streamRef.current) {
+            // Setup Audio Context for Background Voice Detection
+            try {
+                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                audioContextRef.current = new AudioContext();
+                analyserRef.current = audioContextRef.current.createAnalyser();
+                const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+                source.connect(analyserRef.current);
+                analyserRef.current.fftSize = 256;
+                
+                if (audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume();
+                }
+
+                // Audio Monitoring (Rule 3)
+                audioInterval = setInterval(() => {
+                    if (!analyserRef.current) return;
+                    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+                    analyserRef.current.getByteFrequencyData(dataArray);
+                    const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                    
+                    if (avg > 25) { 
+                        handleAction({ action: 'WARNING', message: "Background audio detected. Please ensure complete silence during the examination." });
+                    }
+                }, 1000);
+            } catch (e) { console.error("Invigilation Audio Setup Failed", e); }
+
+            // Keyboard / System activity (Rule 4)
+            const blockKeys = (e: KeyboardEvent) => {
+                e.preventDefault();
+                handleAction({ action: 'TERMINATE_EXAM', message: "Unauthorized system activity detected. The exam has been terminated." });
+            };
+            window.addEventListener('keydown', blockKeys);
+
+            // Vision Monitoring (Rule 1, 2)
             visionInterval = setInterval(async () => {
                 if (!videoRef.current) return;
                 const canvas = document.createElement('canvas');
@@ -313,464 +156,518 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, globalTests
                 if (!ctx) return;
                 ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
                 const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-                setProctorStatus('Scanning...');
-                const res = await analyzeProctoringFrame(base64);
-                if (res.suspicious) triggerViolation(`AI Warning: ${res.reason}`);
-                setProctorStatus('Monitoring');
-            }, 8000);
+                
+                setProctorStatus('Active AI Monitoring');
+                try {
+                    const res = await analyzeProctoringFrame(base64);
+                    handleAction(res);
+                } catch (e) {
+                    console.error("Vision check failed", e);
+                }
+            }, 6000);
 
-            audioInterval = setInterval(() => {
-                if (!analyserRef.current) return;
-                const data = new Uint8Array(analyserRef.current.frequencyBinCount);
-                analyserRef.current.getByteFrequencyData(data);
-                const avg = data.reduce((a, b) => a + b) / data.length;
-                setAudioLevel(avg);
-                if (avg > 25) triggerViolation("Noise Level High");
-            }, 500);
+            return () => {
+                clearInterval(visionInterval);
+                clearInterval(audioInterval);
+                window.removeEventListener('keydown', blockKeys);
+            };
+        }
+    }, [phase]);
+
+    // System Monitoring (App switching / Tab switching - Rule 4)
+    useEffect(() => {
+        const handleTerminate = () => {
+            if (phase === 'ARENA') {
+                handleAction({ action: 'TERMINATE_EXAM', message: "Unauthorized system activity detected. The exam has been terminated." });
+            }
+        };
+        const handleVisibility = () => { if (document.hidden) handleTerminate(); };
+        const handleFullscreen = () => { if (!document.fullscreenElement) handleTerminate(); };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+        document.addEventListener('fullscreenchange', handleFullscreen);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibility);
+            document.removeEventListener('fullscreenchange', handleFullscreen);
+        };
+    }, [phase]);
+
+    const handleAction = (res: { action: string, message?: string }) => {
+        if (res.action === 'NONE') {
+            setAiWarning(null);
+            return;
         }
 
-        return () => {
-            clearInterval(visionInterval);
-            clearInterval(audioInterval);
-        };
-    }, [view, activeTest, isDemoMode]);
+        // Debounce warnings to avoid spam
+        const now = Date.now();
+        if (res.action === 'WARNING' && now - lastViolationRef.current < 5000) return;
+        lastViolationRef.current = now;
 
-    const triggerViolation = (reason: string) => {
-        if (isDemoMode) return;
-        if (Date.now() - lastViolationRef.current < 5000) return;
-        lastViolationRef.current = Date.now();
+        if (res.action === 'TERMINATE_EXAM') {
+            setTerminationMessage(res.message || "Unauthorized system activity detected. The exam has been terminated.");
+            setPhase('BLOCKED');
+            return;
+        }
+
         setWarnings(prev => {
             const next = prev + 1;
-            if (next >= 5) submitStudentExam(true);
+            
+            if (res.action === 'CRITICAL_VIOLATION') {
+                setAiWarning(res.message || "Critical integrity violation detected.");
+                // Critical violations count more or lead to faster termination
+                if (next >= 3) {
+                    setTerminationMessage("Maximum integrity violations reached. The exam has been terminated.");
+                    setPhase('BLOCKED');
+                }
+            } else {
+                setAiWarning(res.message || "Integrity warning detected.");
+                if (next >= 5) {
+                    setTerminationMessage("Maximum integrity warnings reached. The exam has been terminated.");
+                    setPhase('BLOCKED');
+                }
+            }
+
+            // Auto-clear visual warning after a few seconds
+            setTimeout(() => setAiWarning(null), 4000);
             return next;
         });
-        showViolationToast(reason);
     };
 
-    const showViolationToast = (msg: string) => {
-        const toast = document.createElement('div');
-        toast.className = "fixed top-12 left-1/2 -translate-x-1/2 bg-red-600 text-white px-8 py-4 rounded-full shadow-2xl z-[999] animate-bounce font-bold border-2 border-white";
-        toast.innerText = `PROCTOR ALERT: ${msg}`;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 4000);
+    const startCamera = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: { ideal: 640 }, height: { ideal: 480 } }, 
+                audio: { echoCancellation: true, noiseSuppression: true } 
+            });
+            streamRef.current = stream;
+            if (videoRef.current) videoRef.current.srcObject = stream;
+        } catch (e) {
+            alert("Camera and Microphone access are mandatory to enter the examination hall.");
+        }
+    };
+
+    // --- VERIFICATION HANDLERS ---
+    const handleSendOtp = () => {
+        if (aadhaar.length !== 12) return;
+        setIsVerifying(true);
+        setTimeout(() => {
+            setIsVerifying(false);
+            setVerificationStep(2);
+            setOtpTimer(60);
+        }, 1200);
+    };
+
+    const handleVerifyOtp = () => {
+        if (otp.length < 4) return;
+        setIsVerifying(true);
+        setTimeout(() => {
+            setIsVerifying(false);
+            setIsOtpVerified(true);
+            setVerificationStep(3);
+        }, 1500);
+    };
+
+    const handleFetchCandidate = () => {
+        if (!appNumber.trim()) return;
+        setIsVerifying(true);
+        setTimeout(() => {
+            setIsVerifying(false);
+            setFetchedCandidate({
+                name: candidateName || "Candidate Verification",
+                photo: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=150&h=150&auto=format&fit=crop",
+                appId: appNumber,
+                status: "VERIFIED"
+            });
+            setVerificationStep(4);
+        }, 2000);
+    };
+
+    const handleProceedToCapture = () => {
+        setPhase('IDENTITY_CAPTURE');
+        startCamera();
+    };
+
+    const captureView = (view: 'front' | 'left' | 'right') => {
+        if (!videoRef.current) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        canvas.getContext('2d')?.drawImage(videoRef.current, 0, 0);
+        setCaptures(prev => ({ ...prev, [view]: canvas.toDataURL('image/jpeg') }));
+    };
+
+    const runIdentityMatch = () => {
+        setPhase('MATCHING');
+        setMatchingStatus('processing');
+        setTimeout(() => {
+            setMatchingStatus('matched');
+            setTimeout(() => setPhase('INSTRUCTIONS'), 1500);
+        }, 3000);
+    };
+
+    const startTest = () => {
+        document.documentElement.requestFullscreen().then(() => {
+            setPhase('ARENA');
+        }).catch(() => alert("Full-screen mode is mandatory for this assessment."));
+    };
+
+    const finalizeTest = () => {
+        setPhase('SUBMITTING');
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        setTimeout(() => {
+            onLogout(); 
+        }, 2000);
     };
 
     useEffect(() => {
         let t: any;
-        if (view === 'STU_ARENA' && timeLeft > 0) {
-            t = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
-        } else if (view === 'STU_ARENA' && timeLeft === 0) {
-            submitStudentExam(true);
-        }
+        if (phase === 'ARENA' && timeLeft > 0) t = setInterval(() => setTimeLeft(p => p - 1), 1000);
+        else if (phase === 'ARENA' && timeLeft === 0) finalizeTest();
         return () => clearInterval(t);
-    }, [view, timeLeft]);
-
-    useEffect(() => {
-        const handleVisibility = () => {
-            if (view === 'STU_ARENA' && document.hidden && activeTest?.settings.preventTabSwitch && !isDemoMode) {
-                triggerViolation("Tab Switching Detected");
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibility);
-        return () => document.removeEventListener('visibilitychange', handleVisibility);
-    }, [view, activeTest, isDemoMode]);
-
-    // --- AUTO SAVE ---
-    useEffect(() => {
-        if (view === 'STU_ARENA') {
-            const saveInterval = setInterval(() => {
-                // In a real app, this would send to backend
-                console.log('Auto-saving progress...');
-            }, 30000);
-            return () => clearInterval(saveInterval);
-        }
-    }, [view, answers]);
+    }, [phase, timeLeft]);
 
     return (
-        <div className="p-6 max-w-7xl mx-auto min-h-[calc(100vh-4rem)] flex flex-col font-sans overflow-hidden">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans transition-colors duration-500 relative">
             
-            {/* VIEW: HUB */}
-            {view === 'HUB' && (
-                <div className="flex-1 flex flex-col justify-center animate-fade-in">
-                    <div className="text-center mb-16">
-                        <h1 className="text-6xl font-black mb-4 bg-gradient-to-r from-red-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">Examination Arena</h1>
-                        <p className="text-gray-500 text-xl font-medium">Professional grade testing hub with AI invigilation and flexible test architecting.</p>
+            {/* PORTAL HEADER */}
+            <header className="sticky top-0 z-[100] w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-8 py-4 flex justify-between items-center shadow-sm">
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-600/20 shadow-lg">
+                        <ShieldCheck className="w-5 h-5 text-white" />
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-5xl mx-auto w-full">
-                        <div className="bg-white dark:bg-gray-800 rounded-[3rem] p-12 shadow-2xl border-b-8 border-indigo-600 group transition-all hover:-translate-y-2 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-8 opacity-5"><Shield className="w-32 h-32" /></div>
-                            <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/40 rounded-[2rem] flex items-center justify-center mb-8 group-hover:rotate-6 transition-transform">
-                                <ShieldCheck className="w-10 h-10 text-indigo-600" />
-                            </div>
-                            <h2 className="text-4xl font-black dark:text-white mb-4">Invigilator</h2>
-                            <p className="text-gray-500 mb-10 text-lg">Architect manual or AI-generated exams. Manage large student batches and monitor integrity live.</p>
-                            <button onClick={() => setView('INV_STEP1')} className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                                <Layout className="w-6 h-6" /> Create Hall
-                            </button>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 rounded-[3rem] p-12 shadow-2xl border-b-8 border-red-600 group transition-all hover:-translate-y-2 relative overflow-hidden">
-                             <div className="absolute top-0 right-0 p-8 opacity-5"><GraduationCap className="w-32 h-32" /></div>
-                            <div className="w-20 h-20 bg-red-100 dark:bg-red-900/40 rounded-[2rem] flex items-center justify-center mb-8 group-hover:-rotate-6 transition-transform">
-                                <GraduationCap className="w-10 h-10 text-red-600" />
-                            </div>
-                            <h2 className="text-4xl font-black dark:text-white mb-4">Student</h2>
-                            <p className="text-gray-500 mb-10 text-lg">Access examination halls using unique codes. Enter the secure arena where AI ensures a fair environment.</p>
-                            <button onClick={() => setView('STU_ENTRY')} className="w-full py-5 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold text-xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                                <Play className="w-6 h-6" /> Join Hall
-                            </button>
-                        </div>
-                    </div>
+                    <span className="text-xl font-black bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                        MyClassroom
+                    </span>
+                    <span className="ml-3 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200 dark:border-slate-700">
+                        Exam Mode
+                    </span>
                 </div>
-            )}
 
-            {/* INVIGILATOR STEP 1: Method Choice */}
-            {view === 'INV_STEP1' && (
-                <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
-                    <button onClick={() => setView('HUB')} className="text-gray-500 font-bold mb-12 hover:text-black">← Return</button>
-                    <h2 className="text-4xl font-black mb-10 dark:text-white uppercase tracking-tight">Select Creation Method</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
-                        <button 
-                            onClick={() => { setCreationMethod('MANUAL'); setWorkingTest({...workingTest, questions: []}); setView('INV_STEP2'); }}
-                            className="bg-white dark:bg-gray-800 p-10 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-indigo-600 transition-all text-left"
-                        >
-                            <FileText className="w-12 h-12 text-indigo-600 mb-6" />
-                            <h3 className="text-2xl font-bold dark:text-white mb-2">Manual Creation</h3>
-                            <p className="text-gray-500">Start with an empty template and craft every question using the rich question builder.</p>
-                        </button>
-                        <button 
-                            onClick={() => { setCreationMethod('AI'); setWorkingTest({...workingTest, questions: []}); setView('INV_STEP2'); }}
-                            className="bg-white dark:bg-gray-800 p-10 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-purple-600 transition-all text-left"
-                        >
-                            <Sparkles className="w-12 h-12 text-purple-600 mb-6" />
-                            <h3 className="text-2xl font-bold dark:text-white mb-2">AI-Generated</h3>
-                            <p className="text-gray-500">Provide a topic or upload material and let AI distribution algorithms draft the questions.</p>
-                        </button>
+                <button 
+                    onClick={onLogout}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-bold text-sm hover:bg-red-100 transition-all shadow-sm active:scale-95 group"
+                >
+                    <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                    Log Out
+                </button>
+            </header>
+
+            {/* WELCOME PHASE */}
+            {phase === 'WELCOME' && (
+                <div className="flex-1 flex flex-col items-center py-12 px-6 animate-fade-in max-w-5xl mx-auto w-full">
+                    <div className="text-center mb-10">
+                        <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-sm border border-emerald-200 dark:border-emerald-800/50">
+                            <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <h1 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight mb-3">Live Assessments</h1>
+                        <p className="text-slate-500 dark:text-slate-400 text-lg">Browse and attempt ongoing examinations currently active in your region.</p>
                     </div>
-                </div>
-            )}
-
-            {/* INVIGILATOR STEP 2: Builder */}
-            {view === 'INV_STEP2' && (
-                <div className="flex-1 flex flex-col lg:flex-row gap-8 animate-fade-in overflow-hidden h-full pb-10">
-                    <div className="w-full lg:w-96 space-y-6 overflow-y-auto pr-2">
-                        {creationMethod === 'AI' && (
-                            <div className="bg-white dark:bg-gray-800 p-6 rounded-[2rem] shadow border border-gray-100 dark:border-gray-700">
-                                <h3 className="text-lg font-black mb-4 flex items-center gap-2 dark:text-white"><Sparkles className="w-5 h-5 text-indigo-500" /> AI Distribution</h3>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest block mb-1">Topic</label>
-                                        <input value={aiConfig.topic} onChange={e => setAiConfig({...aiConfig, topic: e.target.value})} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border-none text-sm dark:text-white" placeholder="e.g. Organic Chemistry" />
+                    
+                    <div className="w-full max-w-3xl mb-12">
+                        <div className="relative group">
+                            <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
+                                <Search className="h-6 w-6 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
+                            </div>
+                            <input 
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                placeholder="Search by exam name or board..."
+                                className="w-full pl-16 pr-6 py-5 bg-white dark:bg-slate-900 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 text-lg dark:text-white outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="w-full space-y-4">
+                        {filteredExams.map(exam => (
+                            <div key={exam} className="w-full bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all hover:border-indigo-200 dark:hover:border-indigo-900 group">
+                                <div className="flex items-center gap-5 flex-1 min-w-0">
+                                    <div className="w-14 h-14 bg-slate-50 dark:bg-slate-800 rounded-xl flex-shrink-0 flex items-center justify-center border border-slate-100 dark:border-slate-700">
+                                        <Globe className="w-6 h-6 text-slate-400 dark:text-slate-500" />
                                     </div>
-                                    <div>
-                                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest block mb-1">Count: {aiConfig.count}</label>
-                                        <input type="range" min="5" max="50" step="5" value={aiConfig.count} onChange={e => setAiConfig({...aiConfig, count: Number(e.target.value)})} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest block">Type Distribution</label>
-                                        <div className="flex items-center gap-2"><span className="text-[10px] w-8">MCQ</span><div className="flex-1 h-2 bg-indigo-600 rounded"></div><span className="text-[10px]">60%</span></div>
-                                        <div className="flex items-center gap-2"><span className="text-[10px] w-8">T/F</span><div className="flex-1 h-2 bg-green-600 rounded" style={{width:'20%'}}></div><span className="text-[10px]">20%</span></div>
-                                    </div>
-                                    <button onClick={handleGenerateAI} disabled={isGenerating || !aiConfig.topic} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg">
-                                        {isGenerating ? <Loader2 className="w-5 h-5 animate-spin"/> : <Sparkles className="w-5 h-5"/>} Generate Questions
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-[2rem] shadow border border-gray-100 dark:border-gray-700">
-                             <h3 className="text-lg font-black mb-4 flex items-center gap-2 dark:text-white"><Settings className="w-5 h-5" /> Config</h3>
-                             <div className="space-y-4">
-                                <input value={workingTest.title} onChange={e => setWorkingTest({...workingTest, title: e.target.value})} placeholder="Test Name" className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border-none text-sm dark:text-white" />
-                                <div className="flex items-center gap-2"><Clock className="w-4 h-4" /><input type="number" value={workingTest.settings?.timeLimitMinutes} onChange={e => setWorkingTest({...workingTest, settings: {...workingTest.settings!, timeLimitMinutes: Number(e.target.value)}})} className="w-20 p-2 bg-gray-50 dark:bg-gray-900 rounded-lg border-none text-sm" /> mins</div>
-                                <textarea value={workingTest.instructions} onChange={e => setWorkingTest({...workingTest, instructions: e.target.value})} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border-none text-sm h-24" />
-                             </div>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-800 rounded-[2.5rem] shadow-xl p-8 border dark:border-gray-700">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-black dark:text-white flex items-center gap-3"><List className="w-6 h-6 text-indigo-600" /> Questions ({workingTest.questions?.length || 0})</h2>
-                            <div className="flex gap-2">
-                                <button onClick={addManualQuestion} className="bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-gray-200 transition-all dark:text-white"><PlusCircle className="w-4 h-4" /> Add Question</button>
-                                <button onClick={() => setView('INV_STEP3')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-700 shadow-lg">Next Step <ArrowRight className="w-4 h-4" /></button>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                             {workingTest.questions?.map((q, idx) => (
-                                 <div key={q.id} className="p-6 border border-gray-100 dark:border-gray-700 rounded-2xl flex justify-between items-start group hover:border-indigo-500 transition-colors">
-                                     <div className="flex gap-4">
-                                         <span className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/40 rounded-xl flex items-center justify-center font-black text-indigo-600">{idx+1}</span>
-                                         <div>
-                                             <p className="font-bold dark:text-white text-lg">{q.text || "Untitled Question"}</p>
-                                             <div className="flex gap-3 mt-2">
-                                                <span className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-black text-gray-500">{q.type}</span>
-                                                <span className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-black text-gray-500">{q.marks} MARKS</span>
-                                             </div>
-                                         </div>
-                                     </div>
-                                     <div className="flex gap-1">
-                                         <button onClick={() => setActiveEditIdx(idx)} className="p-2 hover:bg-indigo-50 rounded-lg text-gray-400 hover:text-indigo-600"><Edit3 className="w-5 h-5"/></button>
-                                         <button onClick={() => deleteQuestion(idx)} className="p-2 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-5 h-5"/></button>
-                                     </div>
-                                 </div>
-                             ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* INVIGILATOR STEP 3: Security & Code Generation */}
-            {view === 'INV_STEP3' && (
-                <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
-                    <div className="max-w-xl w-full bg-white dark:bg-gray-800 p-10 rounded-[3rem] shadow-2xl border dark:border-gray-700">
-                        <h2 className="text-3xl font-black mb-8 dark:text-white uppercase tracking-tight text-center">Security Protocols</h2>
-                        <div className="space-y-4 mb-10">
-                            {[
-                                { key: 'proctoring', label: 'Enable AI Proctoring', icon: Eye },
-                                { key: 'requireWebcam', label: 'Require Webcam Monitoring', icon: Camera },
-                                { key: 'preventTabSwitch', label: 'Strict Tab Focus Lock', icon: Layers },
-                                { key: 'allowCalculator', label: 'Include Virtual Calculator', icon: Calculator },
-                                { key: 'allowInternet', label: 'Open Internet Access', icon: Globe },
-                            ].map((s: any) => (
-                                <label key={s.key} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl cursor-pointer hover:scale-[1.02] transition-transform">
-                                    <div className="flex items-center gap-4">
-                                        <s.icon className="w-6 h-6 text-gray-400" />
-                                        <span className="font-bold dark:text-white">{s.label}</span>
-                                    </div>
-                                    <input type="checkbox" checked={((workingTest.settings as any)[s.key])} onChange={() => setWorkingTest({...workingTest, settings: {...workingTest.settings!, [s.key]: !((workingTest.settings as any)[s.key])}})} className="w-6 h-6 rounded border-gray-300 text-indigo-600" />
-                                </label>
-                            ))}
-                        </div>
-                        <div className="flex gap-4">
-                            <button onClick={() => setView('INV_STEP2')} className="px-8 py-5 font-black text-gray-400 hover:text-gray-600">Back</button>
-                            <button onClick={finalizeTestCreation} className="flex-1 py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-2xl shadow-xl hover:bg-indigo-700 transition-all">Launch Test Hall</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* INVIGILATOR DASHBOARD */}
-            {view === 'INV_DASHBOARD' && (
-                <div className="flex-1 flex flex-col items-center justify-center animate-fade-in relative">
-                    <div className="bg-white dark:bg-gray-800 p-12 rounded-[4rem] shadow-2xl border border-indigo-50 dark:border-gray-700 max-w-2xl w-full text-center relative z-10">
-                        <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-8 animate-bounce"><CheckCircle className="w-12 h-12 text-green-600" /></div>
-                        <h2 className="text-5xl font-black mb-4 dark:text-white">Active Hall Open</h2>
-                        <p className="text-gray-500 mb-10 text-xl font-medium">Session ID: {generatedCode}</p>
-                        <div className="bg-indigo-50 dark:bg-gray-900 p-10 rounded-[3rem] mb-12 flex flex-col items-center justify-center border-2 border-indigo-100 dark:border-indigo-900/40">
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.5em] mb-4">ACCESS CODE</span>
-                            <div className="flex items-center gap-6">
-                                <span className="text-6xl font-mono font-black tracking-widest text-indigo-600 select-all">{generatedCode}</span>
-                                <button onClick={() => { navigator.clipboard.writeText(generatedCode); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-lg">
-                                    {copied ? <CheckCircle className="w-6 h-6 text-green-500" /> : <Copy className="w-6 h-6 text-gray-500" />}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <button onClick={() => setView('HUB')} className="py-5 bg-gray-100 dark:bg-gray-700 rounded-[2rem] font-black text-xl hover:bg-gray-200">Return Hub</button>
-                            <button onClick={() => setView('INV_MONITOR')} className="py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xl shadow-xl hover:bg-indigo-700 flex items-center justify-center gap-2 transition-all">
-                                <Monitor className="w-6 h-6"/> Monitor Live
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* INVIGILATOR MONITORING DASHBOARD */}
-            {view === 'INV_MONITOR' && (
-                <div className="flex-1 flex flex-col animate-fade-in h-full">
-                    <div className="flex justify-between items-center mb-8 border-b pb-6 dark:border-gray-700">
-                        <div>
-                            <button onClick={() => setView('INV_DASHBOARD')} className="text-gray-500 font-bold mb-1 hover:text-black">← Back</button>
-                            <h2 className="text-4xl font-black dark:text-white flex items-center gap-3"><Activity className="w-10 h-10 text-red-600 animate-pulse"/> Monitoring: {workingTest.title}</h2>
-                        </div>
-                        <div className="flex gap-3">
-                             <button className="bg-white dark:bg-gray-800 p-4 rounded-2xl border dark:border-gray-700 shadow-sm hover:bg-gray-50"><Pause className="w-5 h-5 text-gray-500"/></button>
-                             <button className="bg-white dark:bg-gray-800 p-4 rounded-2xl border dark:border-gray-700 shadow-sm hover:bg-gray-50"><MessageSquare className="w-5 h-5 text-indigo-500"/></button>
-                             <button className="bg-red-600 text-white px-6 py-4 rounded-2xl font-bold shadow-lg shadow-red-500/20">End Test</button>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pr-2 pb-10">
-                        {[
-                            { name: 'John Doe', q: 3, time: '12:45', status: 'Normal' },
-                            { name: 'Jane Smith', q: 5, time: '8:30', status: 'Warning', alert: 'Multiple tab switches detected' },
-                            { name: 'Bob Wilson', q: 'Submitted', time: '--', status: 'Completed' }
-                        ].map((s, i) => (
-                            <div key={i} className={`bg-white dark:bg-gray-800 rounded-[2.5rem] p-6 shadow-xl border-4 transition-all ${s.status === 'Warning' ? 'border-red-500' : 'border-transparent'}`}>
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center font-bold">{s.name[0]}</div>
-                                        <div>
-                                            <p className="font-black dark:text-white">{s.name}</p>
-                                            <p className="text-xs text-gray-500">Seat ID: B-10{i}</p>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate tracking-tight">{exam}</h3>
+                                            <span className="flex-shrink-0 px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-black uppercase tracking-wider rounded-full border border-emerald-200 dark:border-emerald-800/50 animate-pulse">LIVE</span>
                                         </div>
-                                    </div>
-                                    <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${s.status === 'Completed' ? 'bg-green-100 text-green-700' : s.status === 'Warning' ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-blue-100 text-blue-700'}`}>{s.status}</span>
-                                </div>
-                                <div className="space-y-3 mb-6">
-                                    <div className="flex justify-between text-xs font-bold text-gray-400 uppercase"><span>Progress</span><span>Q{s.q} / 5</span></div>
-                                    <div className="h-2 bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
-                                        <div className="h-full bg-indigo-600" style={{width: typeof s.q === 'number' ? `${(s.q/5)*100}%` : '100%'}}></div>
-                                    </div>
-                                    <div className="flex justify-between text-xs font-bold">
-                                        <span className="text-gray-400 uppercase">Time Left</span>
-                                        <span className="text-indigo-600 font-mono">{s.time}</span>
+                                        <p className="text-sm text-slate-500 dark:text-slate-500 flex items-center gap-2"><Clock className="w-3.5 h-3.5" /> Open for candidates nationwide</p>
                                     </div>
                                 </div>
-                                {s.alert && <div className="p-3 bg-red-50 text-red-600 rounded-xl text-[10px] font-bold flex gap-2 items-center"><AlertTriangle className="w-3 h-3" /> {s.alert}</div>}
+                                <button onClick={() => { setSelectedExam(exam); setPhase('VERIFY_APP'); setVerificationStep(1); }} className="w-full md:w-auto px-10 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-sm uppercase tracking-widest shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
+                                    Start Test <ArrowRight className="w-4 h-4" />
+                                </button>
                             </div>
                         ))}
                     </div>
                 </div>
             )}
 
-            {/* VIEW: STUDENT ENTRY */}
-            {view === 'STU_ENTRY' && (
-                <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
-                    <button onClick={() => setView('HUB')} className="text-gray-500 font-bold mb-12 hover:text-black">← Back to Hub</button>
-                    <div className="max-w-xl w-full text-center">
-                        <div className="w-24 h-24 bg-red-100 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-lg shadow-red-500/10">
-                            <Hash className="w-12 h-12 text-red-600" />
-                        </div>
-                        <h2 className="text-5xl font-black mb-4 dark:text-white uppercase tracking-tight">Hall Authentication</h2>
-                        <p className="text-gray-500 mb-12 text-xl font-medium max-w-md mx-auto">Enter your session access code to initialze seated position.</p>
-                        <div className="relative mb-6">
-                            <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="000000" className="w-full p-10 bg-white dark:bg-gray-800 rounded-[3rem] shadow-xl border-none text-7xl font-mono font-black text-center text-red-600 tracking-[1.5rem] focus:ring-8 focus:ring-red-500/5 outline-none transition-all placeholder:text-gray-100" />
-                            {isCodeValidating && <div className="absolute inset-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-[3rem] flex items-center justify-center"><Loader2 className="w-12 h-12 text-red-600 animate-spin" /></div>}
-                        </div>
-                        <p className="text-indigo-500 font-bold mb-6 flex items-center justify-center gap-2"><Info className="w-4 h-4"/> For demo, use code: <span className="underline select-all">000000</span></p>
-                        <button onClick={validateJoinCode} disabled={joinCode.length < 6 || isCodeValidating} className="w-full py-7 bg-red-600 hover:bg-red-700 text-white rounded-[3rem] font-black text-3xl shadow-2xl transition-all active:scale-95 disabled:opacity-50">Access Arena</button>
-                    </div>
-                </div>
-            )}
-
-            {/* VIEW: STUDENT LOBBY */}
-            {view === 'STU_LOBBY' && activeTest && (
-                <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto animate-fade-in">
-                    {isDemoMode && <div className="mb-6 bg-indigo-600 text-white px-8 py-2 rounded-full font-black text-xs uppercase tracking-[0.3em] shadow-lg flex items-center gap-3"><PlayCircle className="w-4 h-4" /> Demo Mode: Practice Arena Enabled</div>}
-                    <div className="bg-white dark:bg-gray-800 p-12 rounded-[4rem] shadow-2xl border border-red-50 dark:border-gray-700 w-full relative overflow-hidden">
-                        <div className="flex items-center gap-6 mb-12">
-                            <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-[2rem] flex items-center justify-center flex-shrink-0 shadow-inner"><ShieldAlert className="w-10 h-10 text-red-600" /></div>
-                            <div>
-                                <h2 className="text-4xl font-black dark:text-white mb-2">{activeTest.title}</h2>
-                                <p className="text-red-600 font-black uppercase tracking-[0.3em] text-xs flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></div> Session Securely Encrypted</p>
-                            </div>
+            {/* VERIFICATION PORTAL */}
+            {phase === 'VERIFY_APP' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
+                    <div className="w-full max-w-xl bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 text-center relative overflow-hidden">
+                        <div className="mb-10 text-center">
+                            <p className="text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{selectedExam}</p>
+                            <h2 className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">Let's Start</h2>
+                            <div className="w-12 h-1 bg-indigo-600 mx-auto mt-4 rounded-full opacity-20"></div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
-                            <div className="bg-gray-50 dark:bg-gray-900 p-8 rounded-[2.5rem] flex gap-5 border dark:border-gray-800">
-                                <Eye className="w-8 h-8 text-red-600 flex-shrink-0" />
-                                <div><p className="font-black text-lg dark:text-white uppercase tracking-tight">AI Vision</p><p className="text-xs text-gray-500">{isDemoMode ? 'Disabled for practice session.' : 'System scans gaze and occupancy every few seconds.'}</p></div>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-gray-900 p-8 rounded-[2.5rem] flex gap-5 border dark:border-gray-800">
-                                <Mic className="w-8 h-8 text-red-600 flex-shrink-0" />
-                                <div><p className="font-black text-lg dark:text-white uppercase tracking-tight">Sonic Sensor</p><p className="text-xs text-gray-500">{isDemoMode ? 'Disabled for practice session.' : 'Detects whispering or ambient voice frequencies.'}</p></div>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-gray-900 p-8 rounded-[2.5rem] flex gap-5 border dark:border-gray-800">
-                                <Monitor className="w-8 h-8 text-red-600 flex-shrink-0" />
-                                <div><p className="font-black text-lg dark:text-white uppercase tracking-tight">Focus Enforcement</p><p className="text-xs text-gray-500">{isDemoMode ? 'Disabled: Tab switching allowed.' : 'Switching tabs will trigger immediate auto-submission.'}</p></div>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-gray-900 p-8 rounded-[2.5rem] flex gap-5 border dark:border-gray-800">
-                                <Clock className="w-8 h-8 text-red-600 flex-shrink-0" />
-                                <div><p className="font-black text-lg dark:text-white uppercase tracking-tight">20:00 Timer</p><p className="text-xs text-gray-500">Fixed duration session. No pause or exit permitted once started.</p></div>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-6">
-                            <button onClick={() => setView('HUB')} className="px-10 py-5 font-black text-gray-400 hover:text-gray-600">Abort</button>
-                            <button onClick={startStudentArena} className="flex-1 py-6 bg-red-600 text-white rounded-[2.5rem] font-black text-2xl shadow-2xl hover:bg-red-700 transition-all">Begin Examination</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* VIEW: STUDENT ARENA */}
-            {view === 'STU_ARENA' && activeTest && (
-                <div className="flex-1 flex flex-col lg:flex-row gap-8 animate-fade-in pb-20 overflow-hidden relative">
-                    {isDemoMode && <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 to-purple-600 z-50"></div>}
-                    
-                    <div className="w-full lg:w-80 flex flex-col gap-6 order-2 lg:order-1 overflow-y-auto">
-                        <div className="bg-black rounded-[2.5rem] overflow-hidden aspect-video relative border-4 border-red-600 shadow-2xl flex-shrink-0">
-                            {isDemoMode ? (
-                                <div className="absolute inset-0 bg-indigo-900/40 flex items-center justify-center text-center p-6"><p className="text-white text-xs font-black uppercase tracking-widest opacity-80">Demo Practice: Camera Check Disabled</p></div>
-                            ) : (
-                                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-                            )}
-                            <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full text-[10px] text-white font-black border border-white/10">
-                                <div className="w-2.5 h-2.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_#ef4444]"></div> {isDemoMode ? 'PRACTICE' : 'LIVE ENCRYPTED'}
-                            </div>
-                        </div>
-
-                        <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] shadow-xl border dark:border-gray-700 flex-shrink-0">
-                             <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><Activity className="w-4 h-4 text-green-500" /> Metrics</h3>
-                                <div className="flex gap-1.5">{[1,2,3,4,5].map(i => <div key={i} className={`w-3.5 h-1.5 rounded-full ${i <= warnings ? 'bg-red-600 animate-pulse' : 'bg-gray-100 dark:bg-gray-700'}`}></div>)}</div>
-                             </div>
-                             <div className="space-y-6">
-                                <div className="flex items-center gap-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-[2rem]">
-                                    <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-800 rounded-2xl flex items-center justify-center flex-shrink-0"><Calculator className="w-5 h-5 text-indigo-600" /></div>
-                                    <p className="text-[10px] font-black text-indigo-800 dark:text-indigo-200 uppercase tracking-widest">Virtual Calc Available</p>
+                        <div className="space-y-6 text-left">
+                            {/* STEP 1: CANDIDATE DETAILS */}
+                            <div className={`space-y-4 transition-all duration-500 ${verificationStep > 1 ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 1 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>1</div>
+                                    <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Candidate Details</h3>
                                 </div>
-                             </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Name (as per Certificate)</label>
+                                        <div className="relative group">
+                                            <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4" />
+                                            <input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Full Name" className="w-full pl-11 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Date of Birth</label>
+                                        <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white" />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Aadhaar Number (12 Digits)</label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1 group">
+                                            <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
+                                            <input value={aadhaar} maxLength={12} onChange={e => setAadhaar(e.target.value.replace(/\D/g, ''))} placeholder="0000 0000 0000" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none tracking-[0.3em] font-mono text-lg transition-all dark:text-white" />
+                                        </div>
+                                        {verificationStep === 1 && (
+                                            <button onClick={handleSendOtp} disabled={aadhaar.length !== 12 || isVerifying} className="px-6 bg-slate-900 dark:bg-indigo-600 text-white rounded-xl font-bold text-xs uppercase tracking-widest disabled:opacity-30 transition-all hover:scale-105 active:scale-95">
+                                                {isVerifying ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Link'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* STEP 2: OTP VERIFICATION */}
+                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 2 ? 'hidden' : verificationStep > 2 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 2 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>2</div>
+                                    <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Mobile OTP Verification</h3>
+                                </div>
+                                <div className="flex gap-2 items-center">
+                                    <div className="relative flex-1 group">
+                                        <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
+                                        <input value={otp} maxLength={6} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} placeholder="Enter 6-digit OTP" className="w-full pl-12 p-3.5 bg-indigo-50/50 dark:bg-indigo-900/20 rounded-xl border-2 border-indigo-100 dark:border-indigo-800 focus:border-indigo-500 outline-none tracking-[0.5em] font-mono text-xl transition-all dark:text-white" />
+                                    </div>
+                                    {verificationStep === 2 && (
+                                        <button onClick={handleVerifyOtp} disabled={otp.length < 4 || isVerifying} className="px-8 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-30">
+                                            {isVerifying ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Verify'}
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex justify-between items-center px-1">
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Sent to Registered Mobile</p>
+                                    {otpTimer > 0 ? (
+                                        <span className="text-[10px] text-indigo-600 font-black">RESEND IN {otpTimer}s</span>
+                                    ) : (
+                                        <button onClick={() => setOtpTimer(60)} className="text-[10px] text-indigo-600 font-black hover:underline">RESEND OTP</button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* STEP 3: APPLICATION NUMBER */}
+                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 3 ? 'opacity-30 grayscale pointer-events-none' : verificationStep > 3 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 3 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>3</div>
+                                    <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Application Verification</h3>
+                                </div>
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1 group">
+                                        <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
+                                        <input value={appNumber} disabled={!isOtpVerified} onChange={e => setAppNumber(e.target.value.toUpperCase())} placeholder="Enter Application ID" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white font-black tracking-widest disabled:cursor-not-allowed" />
+                                    </div>
+                                    {verificationStep === 3 && (
+                                        <button onClick={handleFetchCandidate} disabled={!appNumber || isVerifying} className="px-6 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-30">
+                                            {isVerifying ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Check DB'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* STEP 4: DATABASE RESULTS */}
+                            {verificationStep === 4 && fetchedCandidate && (
+                                <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-100 dark:border-emerald-800 p-6 rounded-3xl animate-scale-in">
+                                    <div className="flex items-center gap-6">
+                                        <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-white dark:border-slate-700 shadow-lg bg-white shrink-0">
+                                            <img src={fetchedCandidate.photo} alt="Candidate" className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1 flex items-center gap-1">
+                                                <UserRoundCheck className="w-3 h-3" /> Record Matched
+                                            </p>
+                                            <h4 className="text-xl font-black text-slate-900 dark:text-white truncate">{fetchedCandidate.name}</h4>
+                                            <p className="text-xs font-mono font-bold text-slate-500">APP-ID: {fetchedCandidate.appId}</p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-6 pt-4 border-t border-emerald-100 dark:border-emerald-800 flex items-center gap-3">
+                                        <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                                        <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Candidate data successfully validated against records.</p>
+                                    </div>
+                                    <button onClick={handleProceedToCapture} className="mt-6 w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-lg shadow-xl shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-95">
+                                        Verify Biometrics & Continue
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
-                        <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] shadow-xl border dark:border-gray-700 flex-1 min-h-[250px]">
-                            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6">Hall Map</h3>
-                            <div className="grid grid-cols-5 gap-3">
-                                {activeTest.questions.map((_, i) => (
-                                    <button key={i} onClick={() => setCurrentQIdx(i)} className={`w-full aspect-square rounded-2xl font-black text-sm transition-all border-2 ${currentQIdx === i ? 'bg-red-600 text-white scale-110 shadow-xl border-red-600' : answers[activeTest.questions[i].id] ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/40' : 'bg-gray-50 dark:bg-gray-900 text-gray-400 border-transparent hover:border-gray-200'}`}>{i + 1}</button>
+                        <button onClick={() => { setPhase('WELCOME'); setVerificationStep(1); }} className="mt-10 text-slate-400 hover:text-indigo-600 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-2 mx-auto">
+                            <ChevronLeft className="w-3 h-3" /> Choose a different exam
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* IDENTITY CAPTURE PHASE */}
+            {phase === 'IDENTITY_CAPTURE' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
+                    <div className="w-full max-w-4xl bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] shadow-2xl text-center">
+                        <h2 className="text-3xl font-black mb-2 dark:text-white uppercase tracking-tighter">Identity Verification</h2>
+                        <p className="text-slate-500 mb-8">Please capture three clear views of your face.</p>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+                            <div className="relative aspect-video bg-black rounded-[2rem] overflow-hidden border-4 border-slate-100 dark:border-slate-800">
+                                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                                {['front', 'left', 'right'].map(v => (
+                                    <div key={v} className="space-y-2">
+                                        <div className="aspect-[3/4] bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden relative border-2 border-slate-200 dark:border-slate-700">
+                                            {(captures as any)[v] ? <img src={(captures as any)[v]} className="w-full h-full object-cover" /> : <div className="h-full flex items-center justify-center text-slate-400 text-[10px] uppercase font-bold">{v}</div>}
+                                        </div>
+                                        <button onClick={() => captureView(v as any)} className={`w-full py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(captures as any)[v] ? 'bg-green-100 text-green-700' : 'bg-indigo-600 text-white shadow-lg'}`}>{(captures as any)[v] ? 'Retake' : `Snap ${v}`}</button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <button disabled={!captures.front || !captures.left || !captures.right} onClick={runIdentityMatch} className="mt-10 w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2.5rem] font-black text-xl shadow-2xl disabled:opacity-30 transition-all">Verify Identity</button>
+                    </div>
+                </div>
+            )}
+
+            {/* MATCHING PHASE */}
+            {phase === 'MATCHING' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in text-center">
+                    <div className="relative w-32 h-32 mb-8">
+                        <div className="absolute inset-0 border-8 border-slate-100 dark:border-slate-800 rounded-full"></div>
+                        <div className="absolute inset-0 border-8 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                        <UserCheck className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 text-indigo-600" />
+                    </div>
+                    <h2 className="text-3xl font-black dark:text-white uppercase tracking-tighter">Comparing Biometrics</h2>
+                    <p className="text-slate-500 animate-pulse">Running neural match with records...</p>
+                </div>
+            )}
+
+            {/* INSTRUCTIONS PHASE */}
+            {phase === 'INSTRUCTIONS' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
+                    <div className="w-full max-w-2xl bg-white dark:bg-slate-900 p-12 rounded-[4rem] shadow-2xl border-t-8 border-indigo-600">
+                        <h2 className="text-4xl font-black mb-6 dark:text-white uppercase tracking-tighter">Exam Rules & Protocols</h2>
+                        <div className="space-y-4 mb-10">
+                            {[
+                                { icon: Monitor, label: "Strict full-screen mode enforced." },
+                                { icon: Camera, label: "Real-time AI head and gaze tracking." },
+                                { icon: Mic, label: "Background voice monitoring active." },
+                                { icon: Laptop, label: "Keyboard interaction is strictly prohibited." },
+                                { icon: ShieldAlert, label: "Zero tolerance for integrity violations." }
+                            ].map((rule, i) => (
+                                <div key={i} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                                    <rule.icon className="w-6 h-6 text-indigo-600" />
+                                    <span className="font-bold text-slate-700 dark:text-slate-200">{rule.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={startTest} className="w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black text-2xl shadow-2xl flex items-center justify-center gap-3">
+                            <Play className="w-6 h-6 fill-current" /> Enter Hall
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ARENA PHASE */}
+            {phase === 'ARENA' && (
+                <div className="flex-1 flex flex-col lg:flex-row gap-6 p-6 animate-fade-in overflow-hidden relative select-none">
+                    {/* PROFESSIONAL AI WARNING OVERLAY */}
+                    {aiWarning && (
+                        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-900/95 backdrop-blur-md text-white px-10 py-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-slide-up font-bold text-center border-2 border-indigo-500/30 flex items-center gap-4 max-w-[90vw]">
+                            <AlertTriangle className="w-6 h-6 text-yellow-400 flex-shrink-0" /> {aiWarning}
+                        </div>
+                    )}
+
+                    <div className="w-full lg:w-72 flex flex-col gap-4">
+                        <div className="bg-black rounded-[2rem] aspect-video overflow-hidden border-2 border-red-600 relative shadow-2xl">
+                            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                            <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full text-[8px] font-black text-white">
+                                <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></div> AI INVIGILATOR LIVE
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-800">
+                             <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
+                                <span>Integrity Meter</span>
+                                <span className="text-red-600">{warnings}/5 Flags</span>
+                             </div>
+                             <div className="flex gap-1.5">
+                                {[1,2,3,4,5].map(i => <div key={i} className={`h-2 flex-1 rounded-full transition-all duration-700 ${i <= warnings ? 'bg-red-600 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-slate-100 dark:bg-slate-800'}`}></div>)}
+                             </div>
+                             <p className="mt-4 text-[10px] text-slate-400 font-bold uppercase flex items-center gap-2"><Laptop className="w-3 h-3"/> Keypad Locked</p>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-800 flex-1">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-500" /> Exam Progress</h4>
+                            <div className="grid grid-cols-4 gap-2">
+                                {MOCK_QUESTIONS.map((_, i) => (
+                                    <button key={i} onClick={() => setCurrentQIdx(i)} className={`aspect-square rounded-xl font-black text-xs transition-all ${currentQIdx === i ? 'bg-indigo-600 text-white shadow-lg' : answers[MOCK_QUESTIONS[i].id] ? 'bg-green-100 text-green-700' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>
+                                        {i + 1}
+                                    </button>
                                 ))}
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex-1 flex flex-col gap-6 order-1 lg:order-2 overflow-hidden">
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-gray-700 flex justify-between items-center sticky top-0 z-30 backdrop-blur-xl bg-white/90">
+                    <div className="flex-1 flex flex-col gap-6 overflow-hidden">
+                        <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-800 flex justify-between items-center">
                             <div>
-                                <h1 className="text-2xl font-black dark:text-white line-clamp-1">{isDemoMode ? '[DEMO MODE] ' : ''}{activeTest.title}</h1>
-                                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mt-1">Question {currentQIdx + 1} of {activeTest.questions.length}</p>
+                                <h3 className="text-xl font-black dark:text-white line-clamp-1">{selectedExam}</h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Application: {appNumber}</p>
                             </div>
-                            <div className="flex items-center gap-4 bg-red-50 dark:bg-red-900/30 px-8 py-3 rounded-[1.5rem] border border-red-100 dark:border-red-900/20 shadow-inner">
-                                <Clock className="w-7 h-7 text-red-600 animate-pulse" />
-                                <span className="text-4xl font-mono font-black text-red-600 tabular-nums">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+                            <div className="flex items-center gap-4 bg-red-50 dark:bg-red-900/30 px-8 py-3 rounded-2xl border border-red-100/50 shadow-inner">
+                                <Clock className="w-6 h-6 text-red-600 animate-pulse" />
+                                <span className="text-3xl font-mono font-black text-red-600 tabular-nums">
+                                    {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                                </span>
                             </div>
                         </div>
 
-                        <div className="flex-1 bg-white dark:bg-gray-800 p-12 rounded-[4rem] shadow-2xl border border-gray-100 dark:border-gray-700 overflow-y-auto flex flex-col relative group">
+                        <div className="flex-1 bg-white dark:bg-slate-900 p-12 rounded-[3.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-y-auto flex flex-col relative group">
                             <div className="flex-1">
-                                <div className="flex gap-6 mb-12 items-start">
-                                    <span className="text-8xl font-black text-red-600/5 select-none leading-none -mt-4">{currentQIdx + 1}</span>
-                                    <h2 className="text-4xl font-black dark:text-white leading-[1.2]">{activeTest.questions[currentQIdx].text}</h2>
+                                <div className="flex gap-6 mb-12">
+                                    <span className="text-8xl font-black text-indigo-600/5 select-none leading-none -mt-3">{currentQIdx + 1}</span>
+                                    <h2 className="text-3xl font-black dark:text-white leading-tight">{MOCK_QUESTIONS[currentQIdx].text}</h2>
                                 </div>
-
-                                {activeTest.questions[currentQIdx].type === QuestionType.MCQ || activeTest.questions[currentQIdx].type === QuestionType.TRUE_FALSE ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-4xl">
-                                        {activeTest.questions[currentQIdx].options?.map((opt, oIdx) => (
-                                            <button key={oIdx} onClick={() => setAnswers({...answers, [activeTest.questions[currentQIdx].id]: opt})} className={`w-full text-left p-8 rounded-[2.5rem] border-4 transition-all flex items-center gap-6 group relative overflow-hidden ${answers[activeTest.questions[currentQIdx].id] === opt ? 'border-red-600 bg-red-50 dark:bg-red-900/20 ring-8 ring-red-600/5' : 'border-gray-50 dark:bg-gray-900 hover:bg-gray-50'}`}>
-                                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl flex-shrink-0 ${answers[activeTest.questions[currentQIdx].id] === opt ? 'bg-red-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 group-hover:bg-red-100 group-hover:text-red-600'}`}>{String.fromCharCode(65 + oIdx)}</div>
-                                                <span className={`text-xl font-bold ${answers[activeTest.questions[currentQIdx].id] === opt ? 'text-red-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}>{opt}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="relative group/input">
-                                        <textarea value={answers[activeTest.questions[currentQIdx].id] || ''} onChange={e => setAnswers({...answers, [activeTest.questions[currentQIdx].id]: e.target.value})} className="w-full p-10 bg-gray-50 dark:bg-gray-900 rounded-[3rem] border-none text-2xl dark:text-white h-80 focus:ring-8 focus:ring-red-500/5" placeholder="Draft your academic response..." />
-                                        <div className="absolute bottom-6 left-10 flex gap-4 text-[10px] font-black text-gray-300 uppercase tracking-widest">
-                                             <span className="flex items-center gap-1"><Info className="w-3 h-3"/> Word Count: {(answers[activeTest.questions[currentQIdx].id] || '').split(/\s+/).filter(x => x).length}</span>
-                                             {activeTest.questions[currentQIdx].type === QuestionType.SHORT && <span className="text-indigo-400">Hint: Use F = ma</span>}
-                                        </div>
-                                    </div>
-                                )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
+                                    {MOCK_QUESTIONS[currentQIdx].options?.map((opt, oIdx) => (
+                                        <button key={oIdx} onClick={() => setAnswers({...answers, [MOCK_QUESTIONS[currentQIdx].id]: opt})} className={`w-full text-left p-8 rounded-[2rem] border-4 transition-all flex items-center gap-6 group overflow-hidden ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 shadow-inner' : 'border-slate-50 dark:border-slate-800/50 hover:bg-slate-50'}`}>
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-all ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 group-hover:bg-indigo-100'}`}>{String.fromCharCode(65 + oIdx)}</div>
+                                            <span className={`text-lg font-bold ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'text-indigo-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{opt}</span>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
 
-                            <div className="mt-12 flex justify-between border-t-2 border-gray-50 dark:border-gray-900 pt-10">
-                                <button disabled={currentQIdx === 0} onClick={() => setCurrentQIdx(currentQIdx - 1)} className="p-6 bg-gray-100 dark:bg-gray-900 rounded-[2rem] font-black text-gray-400 hover:text-black dark:hover:text-white disabled:opacity-20 transition-all"><ChevronLeft className="w-10 h-10" /></button>
+                            <div className="mt-12 flex justify-between items-center border-t-2 border-slate-50 dark:border-slate-800 pt-10">
+                                <button disabled={currentQIdx === 0} onClick={() => setCurrentQIdx(currentQIdx - 1)} className="p-5 bg-slate-100 dark:bg-slate-800 rounded-2xl disabled:opacity-10 transition-all hover:bg-slate-200"><ChevronLeft className="w-8 h-8 text-slate-400" /></button>
                                 <div className="flex gap-4">
-                                    {currentQIdx === activeTest.questions.length - 1 ? (
-                                        <button onClick={() => submitStudentExam()} className="px-16 bg-green-600 text-white font-black text-2xl rounded-[2.5rem] shadow-2xl shadow-green-600/20 hover:bg-green-700 transition-all active:scale-95 flex items-center gap-3"><CheckCircle className="w-8 h-8" /> Submit Hall</button>
+                                    {currentQIdx === MOCK_QUESTIONS.length - 1 ? (
+                                        <button onClick={finalizeTest} className="px-12 bg-green-600 text-white font-black text-xl rounded-[2rem] shadow-xl hover:bg-green-700 transition-all active:scale-95">Finish Session</button>
                                     ) : (
-                                        <button onClick={() => setCurrentQIdx(currentQIdx + 1)} className="px-10 bg-red-600 text-white rounded-[2rem] shadow-2xl shadow-red-600/20 hover:bg-red-700 transition-all"><ChevronRight className="w-10 h-10" /></button>
+                                        <button onClick={() => setCurrentQIdx(currentQIdx + 1)} className="px-10 bg-indigo-600 text-white rounded-[2rem] shadow-xl hover:bg-indigo-700 transition-all active:scale-95"><ChevronRight className="w-8 h-8" /></button>
                                     )}
                                 </div>
                             </div>
@@ -779,71 +676,30 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, globalTests
                 </div>
             )}
 
-            {/* VIEW: STUDENT SUBMITTING */}
-            {view === 'STU_SUBMITTING' && (
-                <div className="flex-1 flex flex-col items-center justify-center animate-fade-in text-center">
-                    <div className="relative w-48 h-48 mb-12">
-                        <div className="absolute inset-0 border-[12px] border-gray-100 dark:border-gray-800 rounded-full"></div>
-                        <div className="absolute inset-0 border-[12px] border-green-500 rounded-full border-t-transparent animate-spin"></div>
-                        <div className="absolute inset-0 flex items-center justify-center"><Shield className="w-16 h-16 text-green-500" /></div>
-                    </div>
-                    <h2 className="text-5xl font-black mb-4 dark:text-white uppercase tracking-tight">Decrypting Logs</h2>
-                    <p className="text-gray-500 text-2xl font-medium max-w-xl mx-auto">{isDemoMode ? 'Calculating your demo results and generating feedback report.' : 'AI vision logs and response metadata are being encrypted for evaluation. Stand by.'}</p>
+            {/* SUBMITTING PHASE */}
+            {phase === 'SUBMITTING' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in text-center">
+                    <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-8" />
+                    <h2 className="text-4xl font-black dark:text-white uppercase tracking-tighter">Finalizing Response</h2>
+                    <p className="text-slate-500">Encrypting behavioral logs and indexing results...</p>
                 </div>
             )}
 
-            {/* VIEW: STUDENT RESULTS (DEMO) */}
-            {view === 'STU_RESULTS' && activeTest && (
-                <div className="flex-1 flex flex-col items-center justify-center max-w-5xl mx-auto animate-fade-in py-10 w-full">
-                    <div className="bg-white dark:bg-gray-800 p-12 rounded-[4rem] shadow-2xl border border-indigo-50 dark:border-gray-700 w-full">
-                        <div className="text-center mb-12">
-                             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6"><Trophy className="w-10 h-10 text-green-600" /></div>
-                             <h2 className="text-5xl font-black dark:text-white mb-2 uppercase">Arena Completed</h2>
-                             <p className="text-gray-500 text-xl font-medium">Practice results are processed and indexed.</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-                            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-10 rounded-[3rem] text-center border-2 border-indigo-100 dark:border-indigo-800">
-                                <span className="text-xs font-black text-indigo-400 uppercase tracking-widest block mb-2">Practice Score</span>
-                                <span className="text-7xl font-black text-indigo-600">{Object.keys(answers).length} / {activeTest.questions.length}</span>
-                            </div>
-                            <div className="bg-green-50 dark:bg-green-900/20 p-10 rounded-[3rem] text-center border-2 border-green-100 dark:border-green-800">
-                                <span className="text-xs font-black text-green-400 uppercase tracking-widest block mb-2">Accuracy Rate</span>
-                                <span className="text-7xl font-black text-green-600">{Math.round((Object.keys(answers).length / activeTest.questions.length) * 100)}%</span>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6 mb-12 max-h-[400px] overflow-y-auto pr-4 custom-scrollbar">
-                            <div className="flex justify-between items-center mb-4"><h3 className="font-black text-2xl dark:text-white uppercase tracking-tighter">Response Key</h3><button onClick={() => setShowExplanations(!showExplanations)} className="text-sm font-bold text-indigo-600 hover:underline">{showExplanations ? 'Hide Explanations' : 'View Explanations'}</button></div>
-                            {activeTest.questions.map((q, idx) => {
-                                const isCorrect = answers[q.id] === q.correctAnswer || (q.type === QuestionType.SHORT && answers[q.id]?.toLowerCase() === q.correctAnswer?.toLowerCase());
-                                return (
-                                    <div key={idx} className="p-8 bg-gray-50 dark:bg-gray-900/50 rounded-[2.5rem] border border-gray-100 dark:border-gray-800">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <p className="font-black text-xl dark:text-white leading-tight flex-1">{idx+1}. {q.text}</p>
-                                            {isCorrect ? <CheckCircle className="w-8 h-8 text-green-500" /> : <XCircle className="w-8 h-8 text-red-500" />}
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-4">
-                                            <div className="p-3 bg-white dark:bg-gray-800 rounded-xl border"><span className="text-[10px] font-black text-gray-400 block mb-1">YOUR ANSWER</span><p className="font-bold dark:text-white">{answers[q.id] || 'NO RESPONSE'}</p></div>
-                                            <div className="p-3 bg-white dark:bg-gray-800 rounded-xl border border-green-200"><span className="text-[10px] font-black text-green-400 block mb-1">CORRECT KEY</span><p className="font-bold text-green-600">{q.correctAnswer || q.modelAnswer}</p></div>
-                                        </div>
-                                        {showExplanations && <div className="p-4 bg-indigo-50 dark:bg-indigo-900/40 rounded-2xl border border-indigo-100 dark:border-indigo-800"><p className="text-xs font-black text-indigo-600 uppercase mb-1">AI Context</p><p className="text-sm text-gray-700 dark:text-indigo-200">{q.explanation}</p></div>}
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        <div className="flex gap-4">
-                            <button onClick={() => { setAnswers({}); setCurrentQIdx(0); setView('STU_LOBBY'); }} className="flex-1 py-5 bg-gray-100 dark:bg-gray-700 rounded-[2rem] font-black text-xl hover:bg-gray-200 flex items-center justify-center gap-2 transition-all"><RotateCcw className="w-5 h-5" /> Retake Arena</button>
-                            <button onClick={() => setView('HUB')} className="flex-1 py-5 bg-indigo-600 text-white rounded-[2rem] font-black text-xl shadow-xl hover:bg-indigo-700 flex items-center justify-center gap-2 transition-all"><Layout className="w-5 h-5" /> Portal Dashboard</button>
-                        </div>
+            {/* BLOCKED PHASE */}
+            {phase === 'BLOCKED' && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                    <div className="w-24 h-24 bg-red-100 rounded-[2rem] flex items-center justify-center mb-8 animate-bounce">
+                        <AlertTriangle className="w-12 h-12 text-red-600" />
                     </div>
+                    <h2 className="text-4xl font-black text-red-600 uppercase tracking-tighter mb-4">Session Terminated</h2>
+                    <p className="text-slate-500 max-w-md mb-10 leading-relaxed font-bold">
+                        {terminationMessage || "A security protocol violation was detected. Unauthorized actions have resulted in immediate termination of this assessment."}
+                    </p>
+                    <button onClick={() => window.location.reload()} className="px-10 py-5 bg-red-600 text-white rounded-[2rem] font-black text-xl hover:bg-red-700 shadow-2xl transition-all">Exit Hall</button>
                 </div>
             )}
         </div>
     );
 };
-
-const XCircle = ({className}: {className?:string}) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
 
 export default ExaminationCenter;

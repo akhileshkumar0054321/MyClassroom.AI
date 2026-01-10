@@ -316,8 +316,9 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
           // Send to Gemini
           const result = await analyzeProctoringFrame(base64);
           
-          if (result.suspicious) {
-              triggerViolation(`AI Vision Alert: ${result.reason}`);
+          // Fix: Update to check result.action as analyzeProctoringFrame returns {action, message?}
+          if (result.action !== 'NONE') {
+              triggerViolation(`AI Vision Alert: ${result.message || result.action}`, result.action === 'CRITICAL_VIOLATION' || result.action === 'TERMINATE_EXAM');
           }
       } catch (e) {
           console.error("Vision Check Failed", e);

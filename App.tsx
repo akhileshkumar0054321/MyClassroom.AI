@@ -125,7 +125,6 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.LOGIN);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [showExamSelector, setShowExamSelector] = useState(false);
   
   // Data Stores
   const [classrooms, setClassrooms] = useState<Classroom[]>(INITIAL_CLASSROOMS);
@@ -155,22 +154,20 @@ const App: React.FC = () => {
       }
   };
 
-  const handleGuestExamLogin = (role: UserRole) => {
+  const handleGuestExamLogin = () => {
+    // Guest Examination portal entry uses a generic Master role to access the unified hub
     const guestUser: User = {
-        id: `GUEST-${Math.floor(Math.random()*10000)}`,
-        name: role === UserRole.TEACHER ? 'Guest Invigilator' : 'Guest Student',
+        id: `GUEST-EXAM-${Math.floor(Math.random()*10000)}`,
+        name: 'Guest User',
         email: 'guest@myclassroom.ai',
-        role: role,
+        role: UserRole.ADMIN, // Use Admin for full access to the guest portal hub
         preferences: { language: 'English', gradeLevel: '10', style: 'Visual' },
-        profile: { ...MOCK_PROFILE, school: 'Examination Hall' },
+        profile: { ...MOCK_PROFILE, school: 'Examination Portal' },
         friends: []
     };
     setUser(guestUser);
     setView(AppView.EXAMINATION);
-    setShowExamSelector(false);
-    if (!localStorage.getItem('onboarding_done')) {
-        setOnboardingComplete(true); // Skip onboarding for immediate exam guests
-    }
+    setOnboardingComplete(true); // Skip onboarding for direct exam access
   };
 
   const handleEmailLogin = (e: React.FormEvent) => {
@@ -204,7 +201,6 @@ const App: React.FC = () => {
   const handleLogout = () => {
       setUser(null);
       setView(AppView.LOGIN);
-      setShowExamSelector(false);
   };
 
   const addNotification = (title: string, message: string, type: 'INFO' | 'SUCCESS' | 'ERROR' | 'EMAIL') => {
@@ -340,7 +336,7 @@ const App: React.FC = () => {
                         </button>
                         
                         <button 
-                            onClick={() => setShowExamSelector(true)}
+                            onClick={handleGuestExamLogin}
                             className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 flex flex-col items-center gap-2 transition-all hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 group"
                         >
                             <ShieldCheck className="w-8 h-8 text-gray-400 group-hover:text-red-500" />
@@ -395,60 +391,24 @@ const App: React.FC = () => {
                     </div>
                 </div>
             </div>
-
-            {/* EXAMINATION ROLE SELECTOR MODAL */}
-            {showExamSelector && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
-                    <div className="bg-white dark:bg-gray-800 rounded-[2.5rem] shadow-2xl w-full max-w-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <div className="p-8 flex justify-between items-center border-b dark:border-gray-700">
-                            <h3 className="text-2xl font-black dark:text-white">Examination Portal: Choose Your Role</h3>
-                            <button onClick={() => setShowExamSelector(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"><X className="w-6 h-6 dark:text-white"/></button>
-                        </div>
-                        <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* INVIGILATOR OPTION */}
-                            <button 
-                                onClick={() => handleGuestExamLogin(UserRole.TEACHER)}
-                                className="flex flex-col items-center p-8 rounded-[2rem] border-2 border-gray-100 dark:border-gray-700 hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all text-center group"
-                            >
-                                <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/40 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                                    <ShieldCheck className="w-10 h-10 text-indigo-600" />
-                                </div>
-                                <h4 className="text-xl font-bold dark:text-white mb-2">Invigilator</h4>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">Generate tests with AI, manage questions manually, and monitor the live hall.</p>
-                            </button>
-
-                            {/* STUDENT OPTION */}
-                            <button 
-                                onClick={() => handleGuestExamLogin(UserRole.STUDENT)}
-                                className="flex flex-col items-center p-8 rounded-[2rem] border-2 border-gray-100 dark:border-gray-700 hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-center group"
-                            >
-                                <div className="w-20 h-20 bg-red-100 dark:bg-red-900/40 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                                    <GraduationCap className="w-10 h-10 text-red-600" />
-                                </div>
-                                <h4 className="text-xl font-bold dark:text-white mb-2">Student</h4>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">Join a proctored hall via unique access code and submit your responses.</p>
-                            </button>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-gray-900/50 p-6 text-center">
-                            <p className="text-xs text-gray-400">Guest sessions utilize AI-proctoring and real-time response capture.</p>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
       );
   }
 
+  const isExaminationView = view === AppView.EXAMINATION;
+
   return (
     <div className="flex bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100 font-sans transition-colors duration-200">
-      <Sidebar 
-        currentView={view} 
-        onChangeView={setView} 
-        onLogout={handleLogout} 
-        user={user}
-      />
+      {!isExaminationView && (
+          <Sidebar 
+            currentView={view} 
+            onChangeView={setView} 
+            onLogout={handleLogout} 
+            user={user}
+          />
+      )}
       
-      <main className="flex-1 ml-64 relative">
+      <main className={`flex-1 relative transition-all duration-300 ${isExaminationView ? 'ml-0' : 'ml-64'}`}>
          <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2">
              {notifications.map(n => (
                  <div key={n.id} className={`p-4 rounded-lg shadow-xl flex items-center gap-3 animate-slide-in min-w-[300px] ${
@@ -465,17 +425,19 @@ const App: React.FC = () => {
              ))}
          </div>
 
-         {!onboardingComplete && <OnboardingTour onComplete={handleCompleteOnboarding} />}
+         {!onboardingComplete && !isExaminationView && <OnboardingTour onComplete={handleCompleteOnboarding} />}
 
-         <JudgeControls 
-            onLogout={handleLogout} 
-            onReset={resetDemo} 
-            userRole={user.role} 
-            onLoadScenario={(s) => { 
-                if (s === 'TEACHER_DEMO') { handleLogout(); setTimeout(() => handleLogin(UserRole.TEACHER), 100); }
-                else { handleLogout(); setTimeout(() => handleLogin(UserRole.STUDENT), 100); setView(AppView.TEST_MANAGER); }
-            }}
-         />
+         {!isExaminationView && (
+             <JudgeControls 
+                onLogout={handleLogout} 
+                onReset={resetDemo} 
+                userRole={user.role} 
+                onLoadScenario={(s) => { 
+                    if (s === 'TEACHER_DEMO') { handleLogout(); setTimeout(() => handleLogin(UserRole.TEACHER), 100); }
+                    else { handleLogout(); setTimeout(() => handleLogin(UserRole.STUDENT), 100); setView(AppView.TEST_MANAGER); }
+                }}
+             />
+         )}
 
          {view === AppView.DASHBOARD && <Dashboard user={user} changeView={setView} />}
          {view === AppView.VIDEO_GEN && <VideoGenerator onSave={(script) => { setLibrary(prev => [...prev, { id: Date.now().toString(), type: ContentType.VIDEO, title: script.topic, data: script, dateCreated: new Date().toISOString(), userId: user.id, status: 'ACTIVE', isShared: false, views: 0, imports: 0 }]); addNotification('Video Saved', 'Saved to My Library', 'SUCCESS'); }} />}
@@ -505,6 +467,7 @@ const App: React.FC = () => {
             globalTests={tests}
             onAddTest={(t) => setTests([...tests, t])}
             onSaveResult={(r) => { setTestResults([...testResults, r]); addNotification('Public Exam Submitted', 'Result Saved', 'SUCCESS'); }}
+            onLogout={handleLogout}
          />}
          {view === AppView.DOUBT_TUTOR && <DoubtTutor />}
          {view === AppView.LEARNING_PATH && <LearningPathBuilder />}

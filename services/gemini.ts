@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { VideoScript, TestData, LearningPath, Presentation, QuestionType, DoubtResponse, Question, AssignmentSubmission } from "../types";
 
@@ -18,31 +17,34 @@ const getClient = async (useVeo: boolean = false) => {
 };
 
 // --- PROCTORING AGENT ---
-export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ suspicious: boolean, reason: string }> => {
+export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ action: 'NONE' | 'WARNING' | 'CRITICAL_VIOLATION' | 'TERMINATE_EXAM', message?: string }> => {
   const ai = await getClient();
   const prompt = `
-    Analyze this webcam frame of a student taking an online exam. STRICT PROCTORING MODE.
-    
-    Flag as 'suspicious': true if ANY of the following are detected:
-    1. **Multiple Faces**: More than one person visible in the frame.
-    2. **Looking Away**: Head turned significantly left, right, or up. Eyes gazing off-screen to read notes. (Slight downward gaze for typing/writing is Acceptable).
-    3. **Absence**: No face visible in the frame.
-    4. **Objects**: Usage of mobile phones, books, headphones, or other electronic devices.
-    
-    Be sensitive to suspicious eye movement.
-    If suspicious, provide a short 'reason' (e.g. "Looking away left", "Multiple faces detected", "Phone detected").
-    Otherwise 'suspicious': false.
-    
-    Return JSON.
+    You are a high-accuracy AI Exam Invigilator deployed in a live, high-stakes online examination environment.
+    Analyze this webcam frame for violations.
+
+    🔍 INVIGILATION RULES:
+    1. Face Out of Camera: Warning if face is missing or obscured.
+       Message: "Face not detected in camera frame. Please return immediately to continue the exam."
+    2. Multiple Face Detection (ZERO TOLERANCE): Critical Violation if 2+ faces detected.
+       Message: "Multiple faces detected. This is a serious exam integrity violation."
+    3. Unusual Movement: Warning if candidate repeatedly looks away.
+       Message: "Unusual head or face movement detected. Please maintain focus on the screen."
+
+    🔹 RESPONSE FORMAT (JSON ONLY):
+    { "action": "NONE" }
+    { "action": "WARNING", "message": "..." }
+    { "action": "CRITICAL_VIOLATION", "message": "..." }
+    { "action": "TERMINATE_EXAM", "message": "..." }
   `;
 
   const schema = {
     type: Type.OBJECT,
     properties: {
-      suspicious: { type: Type.BOOLEAN },
-      reason: { type: Type.STRING }
+      action: { type: Type.STRING, enum: ["NONE", "WARNING", "CRITICAL_VIOLATION", "TERMINATE_EXAM"] },
+      message: { type: Type.STRING }
     },
-    required: ["suspicious", "reason"]
+    required: ["action"]
   };
 
   try {
@@ -58,11 +60,11 @@ export const analyzeProctoringFrame = async (imageBase64: string): Promise<{ sus
       });
       
       const text = response.text;
-      if (!text) return { suspicious: false, reason: "No response" };
-      return JSON.parse(text) as { suspicious: boolean, reason: string };
+      if (!text) return { action: "NONE" };
+      return JSON.parse(text);
   } catch (e) {
       console.error("Proctoring Error", e);
-      return { suspicious: false, reason: "AI Service Error" };
+      return { action: "NONE" };
   }
 };
 
@@ -199,8 +201,6 @@ export const generatePPT = async (topic: string, slideCount: number): Promise<Pr
   return JSON.parse(response.text || "{}") as Presentation;
 };
 
-// --- ASSIGNMENT AGENTS (NEW) ---
-
 // Agent 1: Assignment Generator
 export const generateAssignmentFromPrompt = async (
     userPrompt: string, 
@@ -219,10 +219,6 @@ export const generateAssignmentFromPrompt = async (
     Total Marks: ${marks}
     
     Generate 5 high-quality questions based on this.
-    For 'ORAL' type questions, provide a prompt that requires a spoken answer.
-    For 'NUMERICAL' type questions, provide a problem that requires a calculated answer.
-    For 'SHORT' or 'LONG' questions, provide a 'modelAnswer' that represents an ideal response.
-    Allocated marks should sum up to ${marks}.
     Return JSON array.
   `;
 
@@ -262,7 +258,6 @@ export const evaluateSubmission = async (
 ): Promise<{ score: number, feedback: string, questionScores: Record<number, number>, questionFeedback: Record<number, string> }> => {
     const ai = await getClient();
     
-    // Prepare context
     const context = questions.map(q => ({
         id: q.id,
         question: q.text,
@@ -273,27 +268,14 @@ export const evaluateSubmission = async (
     }));
 
     const prompt = `
-        You are an AI Paper Checker Agent.
-        Evaluate the student's answers against the correct answers and model answers.
-        
+        Evaluate the student's answers. Return JSON.
         Data: ${JSON.stringify(context)}
-        
-        Task:
-        1. Evaluate each answer individually.
-        2. Assign partial marks where appropriate for Short/Long/Numerical answers.
-        3. Provide brief specific feedback for each question.
-        4. Calculate total score.
-        5. Provide an overall feedback summary.
-        
-        Return JSON.
     `;
 
     const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
-        config: { 
-            responseMimeType: "application/json",
-        }
+        config: { responseMimeType: "application/json" }
     });
 
     const result = JSON.parse(response.text || "{}");
@@ -313,37 +295,8 @@ export const generateClassReport = async (
 ): Promise<string> => {
     const ai = await getClient();
     
-    // Anonymize and summarize for analysis
-    const summaryData = submissions.map(s => ({
-        studentId: s.studentId.substring(0,6), // Partial ID
-        score: s.score,
-        answers: s.answers
-    }));
-
-    const questionsContext = questions.map(q => ({
-        id: q.id,
-        text: q.text,
-        correctAnswer: q.correctAnswer
-    }));
-
     const prompt = `
-        You are an Expert AI Result Formulator Agent.
-        
-        Assignment Title: "${title}"
-        Questions: ${JSON.stringify(questionsContext)}
-        Student Submissions: ${JSON.stringify(summaryData)}
-        
-        Task:
-        Analyze all student submissions and generate a comprehensive result report.
-        
-        Include the following sections in Markdown format:
-        1. **Class Average and Distribution**: Calculate mean, median, and show a grade distribution (A, B, C, D, F).
-        2. **Question-wise Analysis**: Identify which questions were hardest (most wrong answers) and easiest. Explain common mistakes found in the wrong answers.
-        3. **Individual Performance Summary**: Briefly list students (by ID) who excelled and those who need help.
-        4. **Teacher Remarks Template**: A professional paragraph the teacher can use to summarize class performance to parents.
-        5. **Suggested Topics for Revision**: Based on the mistakes, what should the teacher re-teach?
-        
-        Format as a professional, clean Markdown report. Use emojis for section headers.
+        Analyze all student submissions and generate a comprehensive result report for "${title}" in Markdown format.
     `;
 
     const response = await ai.models.generateContent({
@@ -352,11 +305,6 @@ export const generateClassReport = async (
     });
 
     return response.text || "Report generation failed.";
-};
-
-// --- LEGACY ASSIGNMENT GEN (Keep for backward compat if needed) ---
-export const generateAssignmentQuestions = async (topic: string, count: number, difficulty: string, questionType: string): Promise<Question[]> => {
-  return generateAssignmentFromPrompt(`Generate questions about ${topic}`, "General", "10", questionType as any, count * 2);
 };
 
 // --- TEST ---
@@ -396,15 +344,14 @@ export const generateTest = async (topic: string, difficulty: string, count: num
   });
 
   const data = JSON.parse(response.text || "{}");
-  // Fix: Added missing properties to TestSettings within the return object to satisfy the interface.
   return { 
     ...data, 
     id: Date.now().toString(), 
     settings: { 
       timeLimitMinutes: 30, 
-      proctoring: false, 
-      requireWebcam: false,
-      preventTabSwitch: false,
+      proctoring: true, 
+      requireWebcam: true,
+      preventTabSwitch: true,
       allowCalculator: false,
       allowInternet: false,
       adaptive: false, 
@@ -416,41 +363,13 @@ export const generateTest = async (topic: string, difficulty: string, count: num
 // --- DOUBT ---
 export const resolveDoubt = async (question: string, imageBase64?: string): Promise<DoubtResponse> => {
   const ai = await getClient();
-  
-  const promptText = `
-    You are a helpful educational tutor.
-    Question: "${question}".
-    1. Check if the question is related to academic/educational topics (math, science, history, coding, etc.).
-    2. If not academic, set isAcademic to false and politely decline.
-    3. If academic, provide a clear, concise answer.
-    4. Suggest 3 related follow-up questions.
-    Return JSON.
-  `;
-
-  const parts: any[] = [{ text: promptText }];
-  if (imageBase64) {
-    parts.unshift({
-      inlineData: { mimeType: 'image/jpeg', data: imageBase64 }
-    });
-  }
-
-  const schema = {
-      type: Type.OBJECT,
-      properties: {
-          answer: { type: Type.STRING },
-          isAcademic: { type: Type.BOOLEAN },
-          relatedQuestions: { type: Type.ARRAY, items: { type: Type.STRING } }
-      },
-      required: ["answer", "isAcademic", "relatedQuestions"]
-  };
+  const parts: any[] = [{ text: `Resolve academic doubt: ${question}` }];
+  if (imageBase64) parts.unshift({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { 
-        responseMimeType: "application/json",
-        responseSchema: schema
-    }
+    config: { responseMimeType: "application/json" }
   });
 
   return JSON.parse(response.text || "{}") as DoubtResponse;
@@ -460,40 +379,18 @@ export const resolveDoubt = async (question: string, imageBase64?: string): Prom
 export const generateLearningPath = async (goal: string): Promise<LearningPath> => {
   const ai = await getClient();
   const prompt = `Create a 5-day learning plan to achieve: "${goal}". Return JSON.`;
-  
-  const schema = {
-    type: Type.OBJECT,
-    properties: {
-      goal: { type: Type.STRING },
-      schedule: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            day: { type: Type.INTEGER },
-            topic: { type: Type.STRING },
-            activities: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ["day", "topic", "activities"]
-        }
-      }
-    },
-    required: ["goal", "schedule"]
-  };
-
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
-    config: { responseMimeType: "application/json", responseSchema: schema }
+    config: { responseMimeType: "application/json" }
   });
-
   return JSON.parse(response.text || "{}") as LearningPath;
 };
 
 // --- CAREER PATH ---
 export const generateCareerPath = async (interests: string): Promise<string> => {
   const ai = await getClient();
-  const prompt = `Suggest 3 career paths based on these interests/skills: "${interests}". Include required skills and college major. Markdown format.`;
+  const prompt = `Suggest 3 career paths based on these interests: "${interests}". Markdown format.`;
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
@@ -504,7 +401,7 @@ export const generateCareerPath = async (interests: string): Promise<string> => 
 // --- DEMO SCRIPT ---
 export const generateDemoScript = async (role: string): Promise<string> => {
     const ai = await getClient();
-    const prompt = `Write a short 30-second demo script for a ${role} presenting the MyClassroom AI App. Highlight 3 key features (AI Tests, Proctoring, Learning Path). Format as bullet points.`;
+    const prompt = `Write a demo script for ${role} presenting MyClassroom AI. Bullet points.`;
     const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt
