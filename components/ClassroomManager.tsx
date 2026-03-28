@@ -216,7 +216,7 @@ const ClassroomManager: React.FC<ClassroomManagerProps> = ({
           <div className="animate-fade-in">
               {/* DASHBOARD HEADER */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
-                  <div className="h-32 bg-gradient-to-r from-blue-600 to-indigo-700 p-6 relative">
+                  <div className="h-32 bg-gradient-to-r from-blue-600 to-blue-700 p-6 relative">
                       <button onClick={() => setView('LIST')} className="absolute top-4 left-4 text-white/80 hover:text-white flex items-center gap-1 font-bold text-sm bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm">
                           ← All Classes
                       </button>
@@ -294,7 +294,7 @@ const ClassroomManager: React.FC<ClassroomManagerProps> = ({
                                       {studentList.map((student) => (
                                           <div key={student.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
                                               <div className="flex items-center gap-3">
-                                                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white font-bold text-sm">
+                                                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
                                                       {student.name.charAt(0)}
                                                   </div>
                                                   <div>
@@ -571,7 +571,7 @@ const ClassroomManager: React.FC<ClassroomManagerProps> = ({
                             onClick={() => openClassroom(c.id)}
                             className="bg-white dark:bg-gray-800 p-0 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden group hover:shadow-xl transition-all flex flex-col text-left relative"
                         >
-                            <div className="h-28 bg-gradient-to-r from-blue-500 to-indigo-600 p-6 relative">
+                            <div className="h-28 bg-gradient-to-r from-blue-500 to-blue-600 p-6 relative">
                                 <h3 className="text-2xl font-bold text-white mb-1 relative z-10 truncate">{c.name}</h3>
                                 <p className="text-blue-100 text-sm relative z-10">{c.subject}</p>
                                 <div className="absolute right-0 top-0 w-32 h-32 bg-white opacity-10 rounded-full translate-x-8 -translate-y-8 group-hover:scale-110 transition-transform duration-500"></div>

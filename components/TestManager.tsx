@@ -50,8 +50,8 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   const [proctorStatus, setProctorStatus] = useState('Monitoring');
   const [audioLevel, setAudioLevel] = useState(0);
   
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const lastViolationRef = useRef<number>(0);
@@ -153,7 +153,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   const requestPermissions = async () => {
       try {
           // Request permissions with specific constraints for mobile & sensitivity
-          const stream = await navigator.mediaDevices.getUserMedia({ 
+          const mediaStream = await navigator.mediaDevices.getUserMedia({ 
               video: { 
                   facingMode: 'user', // Prefer front camera for self-view on mobile
                   width: { ideal: 640 },
@@ -165,7 +165,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   autoGainControl: true 
               } 
           });
-          streamRef.current = stream;
+          setStream(mediaStream);
           setPermissionsGranted(true);
           setView('TAKE');
       } catch (e) {
@@ -225,25 +225,26 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
     return () => {
         document.removeEventListener("visibilitychange", handleVisibilityChange);
         // Clean up stream on unmount or view change
-        if (streamRef.current && view !== 'TAKE') {
-            streamRef.current.getTracks().forEach(track => track.stop());
+        if (stream && view !== 'TAKE') {
+            stream.getTracks().forEach(track => track.stop());
+            setStream(null);
             if (audioContextRef.current) {
                 audioContextRef.current.close();
                 audioContextRef.current = null;
             }
         }
     };
-  }, [view]);
+  }, [view, stream]);
 
   // Initialize Sensors when in TAKE mode
   useEffect(() => {
       let visionInterval: any;
       let audioInterval: any;
 
-      if (view === 'TAKE' && permissionsGranted && streamRef.current) {
+      if (view === 'TAKE' && permissionsGranted && stream) {
           // 1. Setup Video
           if (videoRef.current) {
-              videoRef.current.srcObject = streamRef.current;
+              videoRef.current.srcObject = stream;
           }
 
           // 2. Setup Audio
@@ -252,7 +253,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
                   audioContextRef.current = new AudioContext();
                   analyserRef.current = audioContextRef.current.createAnalyser();
-                  const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+                  const source = audioContextRef.current.createMediaStreamSource(stream);
                   source.connect(analyserRef.current);
                   analyserRef.current.fftSize = 256;
                   analyserRef.current.smoothingTimeConstant = 0.5; // Smooth out jitter
@@ -277,7 +278,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
           clearInterval(visionInterval);
           clearInterval(audioInterval);
       };
-  }, [view, permissionsGranted]);
+  }, [view, permissionsGranted, stream]);
 
   const checkAudio = () => {
       if (!analyserRef.current) return;
@@ -393,8 +394,9 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
     setView('SUBMITTING');
 
     // Stop camera & audio
-    if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
     }
     if (audioContextRef.current) {
         audioContextRef.current.close();
@@ -439,6 +441,13 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
   };
 
   // --- RENDERERS ---
+
+  const setVideoRef = (el: HTMLVideoElement | null) => {
+    (videoRef as any).current = el;
+    if (el && stream) {
+        el.srcObject = stream;
+    }
+  };
 
   if (user.role === UserRole.TEACHER) {
       return (
@@ -594,7 +603,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                   <div className="max-w-4xl mx-auto text-center py-10">
                       <h2 className="text-3xl font-bold mb-8 dark:text-white">Choose Creation Method</h2>
                       <div className="grid grid-cols-2 gap-8">
-                          <button onClick={() => setView('CREATE_AI')} className="bg-gradient-to-br from-purple-500 to-indigo-600 p-10 rounded-2xl text-white shadow-xl hover:scale-105 transition-transform text-left group relative overflow-hidden">
+                          <button onClick={() => setView('CREATE_AI')} className="bg-gradient-to-br from-purple-500 to-blue-600 p-10 rounded-2xl text-white shadow-xl hover:scale-105 transition-transform text-left group relative overflow-hidden">
                               <div className="bg-white/20 w-16 h-16 rounded-full flex items-center justify-center mb-6 group-hover:bg-white/30 transition-colors">
                                   <Loader2 className="w-8 h-8" />
                               </div>
@@ -862,7 +871,7 @@ const TestManager: React.FC<TestManagerProps> = ({ user, globalTests, testHistor
                       <div className="w-full lg:w-80 flex flex-col gap-4 order-1 lg:order-2 flex-shrink-0">
                           {/* Camera Feed */}
                           <div className="bg-black rounded-xl overflow-hidden shadow-lg border-2 border-red-500 relative aspect-video">
-                              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover transform scale-x-[-1]" />
+                              <video ref={setVideoRef} autoPlay muted playsInline className="w-full h-full object-cover transform scale-x-[-1]" />
                               <div className="absolute top-2 left-2 flex items-center gap-2">
                                   <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
                                   <span className="text-xs text-white font-bold bg-black/50 px-2 py-0.5 rounded">REC</span>

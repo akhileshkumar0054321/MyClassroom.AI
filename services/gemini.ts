@@ -3,17 +3,22 @@ import { VideoScript, TestData, LearningPath, Presentation, QuestionType, DoubtR
 
 // Helper to get GoogleGenAI client with correct initialization
 const getClient = async (useVeo: boolean = false) => {
+  const win = window as any;
+  
   if (useVeo) {
-    const win = window as any;
-    if (win.aistudio && typeof win.aistudio.hasSelectedApiKey === 'function' && await win.aistudio.hasSelectedApiKey()) {
-        // Key is injected via environment
-    } else if (win.aistudio && typeof win.aistudio.openSelectKey === 'function') {
-       await win.aistudio.openSelectKey();
+    if (win.aistudio && typeof win.aistudio.hasSelectedApiKey === 'function') {
+      const hasKey = await win.aistudio.hasSelectedApiKey();
+      if (!hasKey && typeof win.aistudio.openSelectKey === 'function') {
+        await win.aistudio.openSelectKey();
+        // Assume success after triggering the dialog
+      }
     }
+    // Veo requires the user-selected paid API key, which is available in process.env.API_KEY
+    return new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   }
 
-  // Always use process.env.API_KEY directly as required by guidelines
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Always use process.env.GEMINI_API_KEY directly as required by guidelines for standard models
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 };
 
 // --- PROCTORING AGENT ---
@@ -135,9 +140,35 @@ export const generateVeoPreview = async (prompt: string): Promise<string | null>
     }
 
     const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-    return videoUri ? `${videoUri}&key=${process.env.API_KEY}` : null;
-  } catch (e) {
+    if (!videoUri) return null;
+
+    // Fetch the video using the API key in the x-goog-api-key header as recommended
+    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+    const response = await fetch(videoUri, {
+      method: 'GET',
+      headers: {
+        'x-goog-api-key': apiKey as string,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch (e: any) {
     console.error("Veo generation failed", e);
+    
+    // If permission denied or entity not found, it might be an issue with the selected key
+    const errorMsg = e?.message || "";
+    if (errorMsg.includes("403") || errorMsg.includes("Requested entity was not found")) {
+      const win = window as any;
+      if (win.aistudio && typeof win.aistudio.openSelectKey === 'function') {
+        // Prompting again might help the user select a valid paid key
+        win.aistudio.openSelectKey();
+      }
+    }
     return null;
   }
 };

@@ -28,7 +28,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, changeView, stats }) => {
   const studentButtons = [
     { label: 'LIVE TEST', view: AppView.TEST_MANAGER, icon: PlayCircle, color: 'bg-red-600', sub: 'Join via Code' },
     { label: 'MY ASSIGNMENTS', view: AppView.ASSIGNMENTS, icon: FileText, color: 'bg-orange-600', sub: 'View Pending' },
-    { label: 'MY CLASSROOMS', view: AppView.CLASSROOMS, icon: Users, color: 'bg-indigo-600', sub: 'View Classes' },
+    { label: 'MY CLASSROOMS', view: AppView.CLASSROOMS, icon: Users, color: 'bg-blue-600', sub: 'View Classes' },
     { label: 'VIDEO TEACHER', view: AppView.VIDEO_GEN, icon: Video, color: 'bg-blue-600', sub: 'AI Generated' },
     { label: 'SMART NOTES', view: AppView.NOTES_GEN, icon: FileText, color: 'bg-green-600', sub: 'Revision' },
     { label: 'MY PROFILE', view: AppView.PROFILE, icon: UserIcon, color: 'bg-gray-600', sub: 'Settings' },
@@ -175,7 +175,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, changeView, stats }) => {
            
            {/* Daily Quote (Student Only) */}
            {user.role === UserRole.STUDENT && (
-               <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg p-6 text-white flex flex-col justify-center h-full relative overflow-hidden group">
+               <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl shadow-lg p-6 text-white flex flex-col justify-center h-full relative overflow-hidden group">
                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                        <Quote className="w-24 h-24" />
                    </div>

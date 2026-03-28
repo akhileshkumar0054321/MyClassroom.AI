@@ -94,7 +94,7 @@ const NotesGenerator: React.FC<NotesGeneratorProps> = ({ onSave }) => {
                 components={{
                     blockquote: ({node, ...props}) => <blockquote className="bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 p-4 my-4 rounded-r not-italic" {...props} />,
                     h1: ({node, ...props}) => <h1 className="text-3xl font-bold text-center text-primary-700 dark:text-primary-300 mb-6 pb-2 border-b-2 border-primary-100" {...props} />,
-                    pre: ({node, ...props}) => <div className="bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 p-4 rounded-lg my-4 text-center font-mono text-xl" {...props} />,
+                    pre: ({node, ...props}) => <pre className="bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 p-4 rounded-lg my-4 text-center font-mono text-xl whitespace-pre-wrap" {...props} />,
                 }}
               >
                   {notes}

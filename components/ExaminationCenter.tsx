@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { analyzeProctoringFrame } from '../services/gemini';
-import { TestResult, QuestionType, Question, User } from '../types';
+import { TestResult, QuestionType, Question, User, StudentSession } from '../types';
+import { SHARED_EXAM_LIST } from '../constants';
 import { 
     Play, ShieldCheck, Hash, CheckCircle, Camera, Activity, 
     Clock, ShieldAlert, ChevronRight, ChevronLeft, 
@@ -9,16 +11,6 @@ import {
     Fingerprint, Smartphone, UserRoundCheck, Image as ImageIcon
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-
-// --- CONSTANTS ---
-const EXAM_LIST = [
-    "NISM (Capital Markets)", "NCFM", "Graduate Record Examinations (GRE)", 
-    "Test of English as a Foreign Language (TOEFL iBT)", "Graduate Management Admission Test (GMAT)", 
-    "International English Language Testing System (IELTS)", "Microsoft Certification Exams", 
-    "Amazon Web Services (AWS) Certification", "Cisco Certification Exams (CCNA)", 
-    "Cisco Certification Exams (CCNP)", "Test of Professional Skills (TOPS) & Other Corporate Hiring Tests", 
-    "Certifications by Google (Google Career Certificates)"
-];
 
 const MOCK_QUESTIONS: Question[] = [
     { id: 1, text: "In a stock market context, what does IPO stand for?", type: QuestionType.MCQ, options: ["Internal Profit Option", "Initial Public Offering", "International Payment Order", "Investment Portfolio Overhaul"], correctAnswer: "Initial Public Offering", difficulty: "Easy", explanation: "IPO is the first time a company sells stock to the public.", marks: 2 },
@@ -36,9 +28,10 @@ interface ExaminationCenterProps {
     onLogout: () => void; 
     globalTests?: any;
     onAddTest?: any;
+    preSelectedExam?: string;
 }
 
-const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResult, onLogout }) => {
+const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResult, onLogout, preSelectedExam }) => {
     const [phase, setPhase] = useState<PortalPhase>('WELCOME');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedExam, setSelectedExam] = useState('');
@@ -59,23 +52,41 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
     const [captures, setCaptures] = useState<{ front: string | null; left: string | null; right: string | null }>({ front: null, left: null, right: null });
     const [matchingStatus, setMatchingStatus] = useState<'idle' | 'processing' | 'matched' | 'failed'>('idle');
 
+    // Handle pre-selected exam from login
+    useEffect(() => {
+        if (preSelectedExam) {
+            setSelectedExam(preSelectedExam);
+            setPhase('VERIFY_APP'); // Start with verification
+            setAppNumber(`REG-${Math.floor(Math.random() * 1000000)}`);
+        }
+    }, [preSelectedExam]);
+
     // Exam Arena State
     const [currentQIdx, setCurrentQIdx] = useState(0);
     const [answers, setAnswers] = useState<Record<number, string>>({});
     const [timeLeft, setTimeLeft] = useState(600); // 10 mins
+    const [stream, setStream] = useState<MediaStream | null>(null);
     const [warnings, setWarnings] = useState(0);
     const [proctorStatus, setProctorStatus] = useState('Monitoring');
     const [aiWarning, setAiWarning] = useState<string | null>(null);
     const [terminationMessage, setTerminationMessage] = useState<string | null>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
-    const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const lastViolationRef = useRef<number>(0);
+    const socketRef = useRef<Socket | null>(null);
+
+    // Callback ref for video to ensure stream attachment
+    const setVideoRef = (el: HTMLVideoElement | null) => {
+        if (el && stream && el.srcObject !== stream) {
+            el.srcObject = stream;
+        }
+        (videoRef as any).current = el;
+    };
 
     // Filtered Exams
-    const filteredExams = EXAM_LIST.filter(e => e.toLowerCase().includes(searchTerm.toLowerCase()));
+    const filteredExams = SHARED_EXAM_LIST.filter(e => e.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
     // OTP Timer Effect
     useEffect(() => {
@@ -88,11 +99,11 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
 
     // --- HARDWARE KILLSWITCH & CLEANUP ---
     useEffect(() => {
-        const monitoringPhases: PortalPhase[] = ['IDENTITY_CAPTURE', 'MATCHING', 'ARENA'];
+        const monitoringPhases: PortalPhase[] = ['IDENTITY_CAPTURE', 'MATCHING', 'INSTRUCTIONS', 'ARENA'];
         if (!monitoringPhases.includes(phase)) {
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => track.stop());
-                streamRef.current = null;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                setStream(null);
             }
             if (audioContextRef.current) {
                 audioContextRef.current.close().catch(() => {});
@@ -103,23 +114,58 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
 
     useEffect(() => {
         return () => {
-            if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+            if (stream) stream.getTracks().forEach(track => track.stop());
             if (audioContextRef.current) audioContextRef.current.close().catch(() => {});
         };
-    }, []);
+    }, [stream]);
 
     // --- AI INVIGILATOR AGENT ---
     useEffect(() => {
         let visionInterval: any;
         let audioInterval: any;
+        let streamingInterval: any;
 
-        if (phase === 'ARENA' && streamRef.current) {
+        if (phase === 'ARENA' && stream) {
+            // Connect to real-time invigilation server
+            const socket = io(window.location.origin);
+            socketRef.current = socket;
+
+            socket.on('connect', () => {
+                const session: StudentSession = {
+                    studentId: user.id,
+                    studentName: user.name,
+                    examId: selectedExam,
+                    examTitle: selectedExam,
+                    startTime: new Date().toISOString(),
+                    status: 'ACTIVE',
+                    slashCount: warnings
+                };
+                socket.emit('student_joined', session);
+            });
+
+            socket.on('student_kicked', (data: { reason: string }) => {
+                setTerminationMessage(data.reason || "You have been removed from the examination by an invigilator.");
+                setPhase('BLOCKED');
+            });
+
+            // Streaming frames to invigilator (Simple SFU approach)
+            streamingInterval = setInterval(() => {
+                if (!videoRef.current) return;
+                const canvas = document.createElement('canvas');
+                canvas.width = 160; canvas.height = 120; // Low res for bandwidth
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                const frame = canvas.toDataURL('image/jpeg', 0.4);
+                socket.emit('stream_frame', { studentId: user.id, frame });
+            }, 2000);
+
             // Setup Audio Context for Background Voice Detection
             try {
                 const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
                 audioContextRef.current = new AudioContext();
                 analyserRef.current = audioContextRef.current.createAnalyser();
-                const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+                const source = audioContextRef.current.createMediaStreamSource(stream);
                 source.connect(analyserRef.current);
                 analyserRef.current.fftSize = 256;
                 
@@ -147,6 +193,22 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             };
             window.addEventListener('keydown', blockKeys);
 
+            // Tab Switching & Fullscreen Monitoring
+            const handleVisibilityChange = () => {
+                if (document.hidden) {
+                    handleAction({ action: 'WARNING', message: "Unauthorized tab switching detected. This is strictly prohibited!" });
+                }
+            };
+
+            const handleFullscreenChange = () => {
+                if (!document.fullscreenElement) {
+                    handleAction({ action: 'WARNING', message: "Exiting fullscreen mode is prohibited. Please maintain fullscreen." });
+                }
+            };
+
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+            document.addEventListener('fullscreenchange', handleFullscreenChange);
+
             // Vision Monitoring (Rule 1, 2)
             visionInterval = setInterval(async () => {
                 if (!videoRef.current) return;
@@ -164,33 +226,27 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                 } catch (e) {
                     console.error("Vision check failed", e);
                 }
-            }, 6000);
+            }, 8000); // Check every 8 seconds
 
             return () => {
                 clearInterval(visionInterval);
                 clearInterval(audioInterval);
+                clearInterval(streamingInterval);
+                if (socketRef.current) socketRef.current.disconnect();
                 window.removeEventListener('keydown', blockKeys);
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+                document.removeEventListener('fullscreenchange', handleFullscreenChange);
             };
         }
-    }, [phase]);
+    }, [phase, stream]);
 
-    // System Monitoring (App switching / Tab switching - Rule 4)
+    // Termination Check
     useEffect(() => {
-        const handleTerminate = () => {
-            if (phase === 'ARENA') {
-                handleAction({ action: 'TERMINATE_EXAM', message: "Unauthorized system activity detected. The exam has been terminated." });
-            }
-        };
-        const handleVisibility = () => { if (document.hidden) handleTerminate(); };
-        const handleFullscreen = () => { if (!document.fullscreenElement) handleTerminate(); };
-
-        document.addEventListener('visibilitychange', handleVisibility);
-        document.addEventListener('fullscreenchange', handleFullscreen);
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibility);
-            document.removeEventListener('fullscreenchange', handleFullscreen);
-        };
-    }, [phase]);
+        if (warnings >= 5) {
+            setTerminationMessage("Maximum integrity warnings reached. The exam has been terminated.");
+            setPhase('BLOCKED');
+        }
+    }, [warnings]);
 
     const handleAction = (res: { action: string, message?: string }) => {
         if (res.action === 'NONE') {
@@ -209,38 +265,46 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             return;
         }
 
-        setWarnings(prev => {
-            const next = prev + 1;
-            
-            if (res.action === 'CRITICAL_VIOLATION') {
-                setAiWarning(res.message || "Critical integrity violation detected.");
-                // Critical violations count more or lead to faster termination
-                if (next >= 3) {
-                    setTerminationMessage("Maximum integrity violations reached. The exam has been terminated.");
-                    setPhase('BLOCKED');
+        if (res.action === 'CRITICAL_VIOLATION') {
+            setAiWarning(res.message || "Critical integrity violation detected.");
+            setWarnings(prev => {
+                const newWarnings = prev + 2;
+                if (socketRef.current) {
+                    socketRef.current.emit('violation_updated', {
+                        studentId: user.id,
+                        slashCount: newWarnings,
+                        lastViolation: res.message || "Critical integrity violation detected."
+                    });
                 }
-            } else {
-                setAiWarning(res.message || "Integrity warning detected.");
-                if (next >= 5) {
-                    setTerminationMessage("Maximum integrity warnings reached. The exam has been terminated.");
-                    setPhase('BLOCKED');
+                return newWarnings;
+            });
+        } else {
+            setAiWarning(res.message || "Integrity warning detected.");
+            setWarnings(prev => {
+                const newWarnings = prev + 1;
+                if (socketRef.current) {
+                    socketRef.current.emit('violation_updated', {
+                        studentId: user.id,
+                        slashCount: newWarnings,
+                        lastViolation: res.message || "Integrity warning detected."
+                    });
                 }
-            }
+                return newWarnings;
+            });
+        }
 
-            // Auto-clear visual warning after a few seconds
-            setTimeout(() => setAiWarning(null), 4000);
-            return next;
-        });
+        // Auto-clear visual warning after a few seconds
+        setTimeout(() => setAiWarning(null), 4000);
     };
 
     const startCamera = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ 
                 video: { width: { ideal: 640 }, height: { ideal: 480 } }, 
                 audio: { echoCancellation: true, noiseSuppression: true } 
             });
-            streamRef.current = stream;
-            if (videoRef.current) videoRef.current.srcObject = stream;
+            setStream(mediaStream);
+            if (videoRef.current) videoRef.current.srcObject = mediaStream;
         } catch (e) {
             alert("Camera and Microphone access are mandatory to enter the examination hall.");
         }
@@ -312,7 +376,8 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
 
     const finalizeTest = () => {
         setPhase('SUBMITTING');
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        setStream(null);
         setTimeout(() => {
             onLogout(); 
         }, 2000);
@@ -331,10 +396,10 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             {/* PORTAL HEADER */}
             <header className="sticky top-0 z-[100] w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-8 py-4 flex justify-between items-center shadow-sm">
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-600/20 shadow-lg">
+                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-blue-600/20 shadow-lg">
                         <ShieldCheck className="w-5 h-5 text-white" />
                     </div>
-                    <span className="text-xl font-black bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                    <span className="text-xl font-black bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                         MyClassroom
                     </span>
                     <span className="ml-3 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200 dark:border-slate-700">
@@ -365,33 +430,33 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                     <div className="w-full max-w-3xl mb-12">
                         <div className="relative group">
                             <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
-                                <Search className="h-6 w-6 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
+                                <Search className="h-6 w-6 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
                             </div>
                             <input 
                                 value={searchTerm}
                                 onChange={e => setSearchTerm(e.target.value)}
                                 placeholder="Search by exam name or board..."
-                                className="w-full pl-16 pr-6 py-5 bg-white dark:bg-slate-900 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 text-lg dark:text-white outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                                className="w-full pl-16 pr-6 py-5 bg-white dark:bg-slate-900 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 text-lg dark:text-white outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all placeholder:text-slate-400"
                             />
                         </div>
                     </div>
                     
                     <div className="w-full space-y-4">
                         {filteredExams.map(exam => (
-                            <div key={exam} className="w-full bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all hover:border-indigo-200 dark:hover:border-indigo-900 group">
+                            <div key={exam.id} className="w-full bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all hover:border-blue-200 dark:hover:border-blue-900 group">
                                 <div className="flex items-center gap-5 flex-1 min-w-0">
                                     <div className="w-14 h-14 bg-slate-50 dark:bg-slate-800 rounded-xl flex-shrink-0 flex items-center justify-center border border-slate-100 dark:border-slate-700">
                                         <Globe className="w-6 h-6 text-slate-400 dark:text-slate-500" />
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-3 mb-1">
-                                            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate tracking-tight">{exam}</h3>
+                                            <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 truncate tracking-tight">{exam.title}</h3>
                                             <span className="flex-shrink-0 px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-black uppercase tracking-wider rounded-full border border-emerald-200 dark:border-emerald-800/50 animate-pulse">LIVE</span>
                                         </div>
                                         <p className="text-sm text-slate-500 dark:text-slate-500 flex items-center gap-2"><Clock className="w-3.5 h-3.5" /> Open for candidates nationwide</p>
                                     </div>
                                 </div>
-                                <button onClick={() => { setSelectedExam(exam); setPhase('VERIFY_APP'); setVerificationStep(1); }} className="w-full md:w-auto px-10 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-sm uppercase tracking-widest shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
+                                <button onClick={() => { setSelectedExam(exam.title); setPhase('VERIFY_APP'); setVerificationStep(1); }} className="w-full md:w-auto px-10 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-sm uppercase tracking-widest shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
                                     Start Test <ArrowRight className="w-4 h-4" />
                                 </button>
                             </div>
@@ -403,18 +468,25 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             {/* VERIFICATION PORTAL */}
             {phase === 'VERIFY_APP' && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-                    <div className="w-full max-w-xl bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 text-center relative overflow-hidden">
+                    <div className="w-full max-w-xl bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 text-center relative">
+                        <button 
+                            onClick={() => setPhase('WELCOME')}
+                            className="absolute top-8 left-8 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                            title="Back to Exam List"
+                        >
+                            <ChevronLeft className="w-6 h-6" />
+                        </button>
                         <div className="mb-10 text-center">
-                            <p className="text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{selectedExam}</p>
+                            <p className="text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{selectedExam}</p>
                             <h2 className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">Let's Start</h2>
-                            <div className="w-12 h-1 bg-indigo-600 mx-auto mt-4 rounded-full opacity-20"></div>
+                            <div className="w-12 h-1 bg-blue-600 mx-auto mt-4 rounded-full opacity-20"></div>
                         </div>
 
                         <div className="space-y-6 text-left">
                             {/* STEP 1: CANDIDATE DETAILS */}
                             <div className={`space-y-4 transition-all duration-500 ${verificationStep > 1 ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
                                 <div className="flex items-center gap-3 mb-4">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 1 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>1</div>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 1 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>1</div>
                                     <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Candidate Details</h3>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -422,12 +494,12 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                         <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Name (as per Certificate)</label>
                                         <div className="relative group">
                                             <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4" />
-                                            <input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Full Name" className="w-full pl-11 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white" />
+                                            <input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Full Name" className="w-full pl-11 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-blue-500 outline-none transition-all dark:text-white" />
                                         </div>
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Date of Birth</label>
-                                        <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white" />
+                                        <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-blue-500 outline-none transition-all dark:text-white" />
                                     </div>
                                 </div>
                                 <div className="space-y-1">
@@ -435,10 +507,10 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                     <div className="flex gap-2">
                                         <div className="relative flex-1 group">
                                             <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
-                                            <input value={aadhaar} maxLength={12} onChange={e => setAadhaar(e.target.value.replace(/\D/g, ''))} placeholder="0000 0000 0000" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none tracking-[0.3em] font-mono text-lg transition-all dark:text-white" />
+                                            <input value={aadhaar} maxLength={12} onChange={e => setAadhaar(e.target.value.replace(/\D/g, ''))} placeholder="0000 0000 0000" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-blue-500 outline-none tracking-[0.3em] font-mono text-lg transition-all dark:text-white" />
                                         </div>
                                         {verificationStep === 1 && (
-                                            <button onClick={handleSendOtp} disabled={aadhaar.length !== 12 || isVerifying} className="px-6 bg-slate-900 dark:bg-indigo-600 text-white rounded-xl font-bold text-xs uppercase tracking-widest disabled:opacity-30 transition-all hover:scale-105 active:scale-95">
+                                            <button onClick={handleSendOtp} disabled={aadhaar.length !== 12 || isVerifying} className="px-6 bg-slate-900 dark:bg-blue-600 text-white rounded-xl font-bold text-xs uppercase tracking-widest disabled:opacity-30 transition-all hover:scale-105 active:scale-95">
                                                 {isVerifying ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Link'}
                                             </button>
                                         )}
@@ -447,18 +519,18 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                             </div>
 
                             {/* STEP 2: OTP VERIFICATION */}
-                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 2 ? 'hidden' : verificationStep > 2 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
+                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 2 ? 'opacity-0 h-0 overflow-hidden pointer-events-none' : verificationStep > 2 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
                                 <div className="flex items-center gap-3 mb-2">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 2 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>2</div>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 2 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>2</div>
                                     <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Mobile OTP Verification</h3>
                                 </div>
                                 <div className="flex gap-2 items-center">
                                     <div className="relative flex-1 group">
                                         <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
-                                        <input value={otp} maxLength={6} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} placeholder="Enter 6-digit OTP" className="w-full pl-12 p-3.5 bg-indigo-50/50 dark:bg-indigo-900/20 rounded-xl border-2 border-indigo-100 dark:border-indigo-800 focus:border-indigo-500 outline-none tracking-[0.5em] font-mono text-xl transition-all dark:text-white" />
+                                        <input value={otp} maxLength={6} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))} placeholder="Enter 6-digit OTP" className="w-full pl-12 p-3.5 bg-blue-50/50 dark:bg-blue-900/20 rounded-xl border-2 border-blue-100 dark:border-blue-800 focus:border-blue-500 outline-none tracking-[0.5em] font-mono text-xl transition-all dark:text-white" />
                                     </div>
                                     {verificationStep === 2 && (
-                                        <button onClick={handleVerifyOtp} disabled={otp.length < 4 || isVerifying} className="px-8 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-30">
+                                        <button onClick={handleVerifyOtp} disabled={otp.length < 4 || isVerifying} className="px-8 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-700 transition-all disabled:opacity-30">
                                             {isVerifying ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Verify'}
                                         </button>
                                     )}
@@ -466,23 +538,23 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                 <div className="flex justify-between items-center px-1">
                                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Sent to Registered Mobile</p>
                                     {otpTimer > 0 ? (
-                                        <span className="text-[10px] text-indigo-600 font-black">RESEND IN {otpTimer}s</span>
+                                        <span className="text-[10px] text-blue-600 font-black">RESEND IN {otpTimer}s</span>
                                     ) : (
-                                        <button onClick={() => setOtpTimer(60)} className="text-[10px] text-indigo-600 font-black hover:underline">RESEND OTP</button>
+                                        <button onClick={() => setOtpTimer(60)} className="text-[10px] text-blue-600 font-black hover:underline">RESEND OTP</button>
                                     )}
                                 </div>
                             </div>
 
                             {/* STEP 3: APPLICATION NUMBER */}
-                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 3 ? 'opacity-30 grayscale pointer-events-none' : verificationStep > 3 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
+                            <div className={`space-y-4 transition-all duration-500 ${verificationStep < 3 ? 'opacity-0 h-0 overflow-hidden pointer-events-none' : verificationStep > 3 ? 'opacity-40 grayscale pointer-events-none' : 'animate-slide-up'}`}>
                                 <div className="flex items-center gap-3 mb-2">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 3 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>3</div>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${verificationStep >= 3 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>3</div>
                                     <h3 className="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Application Verification</h3>
                                 </div>
                                 <div className="flex gap-2">
                                     <div className="relative flex-1 group">
                                         <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5" />
-                                        <input value={appNumber} disabled={!isOtpVerified} onChange={e => setAppNumber(e.target.value.toUpperCase())} placeholder="Enter Application ID" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-indigo-500 outline-none transition-all dark:text-white font-black tracking-widest disabled:cursor-not-allowed" />
+                                        <input value={appNumber} disabled={!isOtpVerified} onChange={e => setAppNumber(e.target.value.toUpperCase())} placeholder="Enter Application ID" className="w-full pl-12 p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-transparent focus:border-blue-500 outline-none transition-all dark:text-white font-black tracking-widest disabled:cursor-not-allowed" />
                                     </div>
                                     {verificationStep === 3 && (
                                         <button onClick={handleFetchCandidate} disabled={!appNumber || isVerifying} className="px-6 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-30">
@@ -518,7 +590,7 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                             )}
                         </div>
 
-                        <button onClick={() => { setPhase('WELCOME'); setVerificationStep(1); }} className="mt-10 text-slate-400 hover:text-indigo-600 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-2 mx-auto">
+                        <button onClick={() => { setPhase('WELCOME'); setVerificationStep(1); }} className="mt-10 text-slate-400 hover:text-blue-600 text-[10px] font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-2 mx-auto">
                             <ChevronLeft className="w-3 h-3" /> Choose a different exam
                         </button>
                     </div>
@@ -528,12 +600,19 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             {/* IDENTITY CAPTURE PHASE */}
             {phase === 'IDENTITY_CAPTURE' && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-                    <div className="w-full max-w-4xl bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] shadow-2xl text-center">
+                    <div className="w-full max-w-4xl bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] shadow-2xl text-center relative">
+                        <button 
+                            onClick={() => setPhase('VERIFY_APP')}
+                            className="absolute top-10 left-10 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                            title="Back to Verification"
+                        >
+                            <ChevronLeft className="w-6 h-6" />
+                        </button>
                         <h2 className="text-3xl font-black mb-2 dark:text-white uppercase tracking-tighter">Identity Verification</h2>
                         <p className="text-slate-500 mb-8">Please capture three clear views of your face.</p>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
                             <div className="relative aspect-video bg-black rounded-[2rem] overflow-hidden border-4 border-slate-100 dark:border-slate-800">
-                                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                                <video ref={setVideoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
                             </div>
                             <div className="grid grid-cols-3 gap-3">
                                 {['front', 'left', 'right'].map(v => (
@@ -541,23 +620,30 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                         <div className="aspect-[3/4] bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden relative border-2 border-slate-200 dark:border-slate-700">
                                             {(captures as any)[v] ? <img src={(captures as any)[v]} className="w-full h-full object-cover" /> : <div className="h-full flex items-center justify-center text-slate-400 text-[10px] uppercase font-bold">{v}</div>}
                                         </div>
-                                        <button onClick={() => captureView(v as any)} className={`w-full py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(captures as any)[v] ? 'bg-green-100 text-green-700' : 'bg-indigo-600 text-white shadow-lg'}`}>{(captures as any)[v] ? 'Retake' : `Snap ${v}`}</button>
+                                        <button onClick={() => captureView(v as any)} className={`w-full py-2 rounded-xl text-[10px] font-black uppercase transition-all ${(captures as any)[v] ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white shadow-lg'}`}>{(captures as any)[v] ? 'Retake' : `Snap ${v}`}</button>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <button disabled={!captures.front || !captures.left || !captures.right} onClick={runIdentityMatch} className="mt-10 w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2.5rem] font-black text-xl shadow-2xl disabled:opacity-30 transition-all">Verify Identity</button>
+                        <button disabled={!captures.front || !captures.left || !captures.right} onClick={runIdentityMatch} className="mt-10 w-full py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[2.5rem] font-black text-xl shadow-2xl disabled:opacity-30 transition-all">Verify Identity</button>
                     </div>
                 </div>
             )}
 
             {/* MATCHING PHASE */}
             {phase === 'MATCHING' && (
-                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in text-center">
+                <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in text-center relative">
+                    <button 
+                        onClick={() => setPhase('IDENTITY_CAPTURE')}
+                        className="absolute top-10 left-10 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                        title="Back to Capture"
+                    >
+                        <ChevronLeft className="w-6 h-6" />
+                    </button>
                     <div className="relative w-32 h-32 mb-8">
                         <div className="absolute inset-0 border-8 border-slate-100 dark:border-slate-800 rounded-full"></div>
-                        <div className="absolute inset-0 border-8 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                        <UserCheck className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 text-indigo-600" />
+                        <div className="absolute inset-0 border-8 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <UserCheck className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 text-blue-600" />
                     </div>
                     <h2 className="text-3xl font-black dark:text-white uppercase tracking-tighter">Comparing Biometrics</h2>
                     <p className="text-slate-500 animate-pulse">Running neural match with records...</p>
@@ -567,8 +653,15 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             {/* INSTRUCTIONS PHASE */}
             {phase === 'INSTRUCTIONS' && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-                    <div className="w-full max-w-2xl bg-white dark:bg-slate-900 p-12 rounded-[4rem] shadow-2xl border-t-8 border-indigo-600">
-                        <h2 className="text-4xl font-black mb-6 dark:text-white uppercase tracking-tighter">Exam Rules & Protocols</h2>
+                    <div className="w-full max-w-2xl bg-white dark:bg-slate-900 p-12 rounded-[4rem] shadow-2xl border-t-8 border-blue-600 relative">
+                        <button 
+                            onClick={() => setPhase('IDENTITY_CAPTURE')}
+                            className="absolute top-10 left-10 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                            title="Back to Verification"
+                        >
+                            <ChevronLeft className="w-6 h-6" />
+                        </button>
+                        <h2 className="text-4xl font-black mb-6 dark:text-white uppercase tracking-tighter text-center">Exam Rules & Protocols</h2>
                         <div className="space-y-4 mb-10">
                             {[
                                 { icon: Monitor, label: "Strict full-screen mode enforced." },
@@ -578,12 +671,12 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                 { icon: ShieldAlert, label: "Zero tolerance for integrity violations." }
                             ].map((rule, i) => (
                                 <div key={i} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
-                                    <rule.icon className="w-6 h-6 text-indigo-600" />
+                                    <rule.icon className="w-6 h-6 text-blue-600" />
                                     <span className="font-bold text-slate-700 dark:text-slate-200">{rule.label}</span>
                                 </div>
                             ))}
                         </div>
-                        <button onClick={startTest} className="w-full py-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black text-2xl shadow-2xl flex items-center justify-center gap-3">
+                        <button onClick={startTest} className="w-full py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[2rem] font-black text-2xl shadow-2xl flex items-center justify-center gap-3">
                             <Play className="w-6 h-6 fill-current" /> Enter Hall
                         </button>
                     </div>
@@ -595,14 +688,14 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                 <div className="flex-1 flex flex-col lg:flex-row gap-6 p-6 animate-fade-in overflow-hidden relative select-none">
                     {/* PROFESSIONAL AI WARNING OVERLAY */}
                     {aiWarning && (
-                        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-900/95 backdrop-blur-md text-white px-10 py-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-slide-up font-bold text-center border-2 border-indigo-500/30 flex items-center gap-4 max-w-[90vw]">
+                        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-900/95 backdrop-blur-md text-white px-10 py-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-slide-up font-bold text-center border-2 border-blue-500/30 flex items-center gap-4 max-w-[90vw]">
                             <AlertTriangle className="w-6 h-6 text-yellow-400 flex-shrink-0" /> {aiWarning}
                         </div>
                     )}
 
                     <div className="w-full lg:w-72 flex flex-col gap-4">
                         <div className="bg-black rounded-[2rem] aspect-video overflow-hidden border-2 border-red-600 relative shadow-2xl">
-                            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                            <video ref={setVideoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
                             <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full text-[8px] font-black text-white">
                                 <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></div> AI INVIGILATOR LIVE
                             </div>
@@ -620,10 +713,10 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                         </div>
 
                         <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-800 flex-1">
-                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-500" /> Exam Progress</h4>
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-500" /> Exam Progress</h4>
                             <div className="grid grid-cols-4 gap-2">
                                 {MOCK_QUESTIONS.map((_, i) => (
-                                    <button key={i} onClick={() => setCurrentQIdx(i)} className={`aspect-square rounded-xl font-black text-xs transition-all ${currentQIdx === i ? 'bg-indigo-600 text-white shadow-lg' : answers[MOCK_QUESTIONS[i].id] ? 'bg-green-100 text-green-700' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>
+                                    <button key={i} onClick={() => setCurrentQIdx(i)} className={`aspect-square rounded-xl font-black text-xs transition-all ${currentQIdx === i ? 'bg-blue-600 text-white shadow-lg' : answers[MOCK_QUESTIONS[i].id] ? 'bg-green-100 text-green-700' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>
                                         {i + 1}
                                     </button>
                                 ))}
@@ -648,14 +741,14 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                         <div className="flex-1 bg-white dark:bg-slate-900 p-12 rounded-[3.5rem] shadow-2xl border border-slate-100 dark:border-slate-800 overflow-y-auto flex flex-col relative group">
                             <div className="flex-1">
                                 <div className="flex gap-6 mb-12">
-                                    <span className="text-8xl font-black text-indigo-600/5 select-none leading-none -mt-3">{currentQIdx + 1}</span>
+                                    <span className="text-8xl font-black text-blue-600/5 select-none leading-none -mt-3">{currentQIdx + 1}</span>
                                     <h2 className="text-3xl font-black dark:text-white leading-tight">{MOCK_QUESTIONS[currentQIdx].text}</h2>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
                                     {MOCK_QUESTIONS[currentQIdx].options?.map((opt, oIdx) => (
-                                        <button key={oIdx} onClick={() => setAnswers({...answers, [MOCK_QUESTIONS[currentQIdx].id]: opt})} className={`w-full text-left p-8 rounded-[2rem] border-4 transition-all flex items-center gap-6 group overflow-hidden ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 shadow-inner' : 'border-slate-50 dark:border-slate-800/50 hover:bg-slate-50'}`}>
-                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-all ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 group-hover:bg-indigo-100'}`}>{String.fromCharCode(65 + oIdx)}</div>
-                                            <span className={`text-lg font-bold ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'text-indigo-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{opt}</span>
+                                        <button key={oIdx} onClick={() => setAnswers({...answers, [MOCK_QUESTIONS[currentQIdx].id]: opt})} className={`w-full text-left p-8 rounded-[2rem] border-4 transition-all flex items-center gap-6 group overflow-hidden ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 shadow-inner' : 'border-slate-50 dark:border-slate-800/50 hover:bg-slate-50'}`}>
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-all ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 group-hover:bg-blue-100'}`}>{String.fromCharCode(65 + oIdx)}</div>
+                                            <span className={`text-lg font-bold ${answers[MOCK_QUESTIONS[currentQIdx].id] === opt ? 'text-blue-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{opt}</span>
                                         </button>
                                     ))}
                                 </div>
@@ -667,7 +760,7 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
                                     {currentQIdx === MOCK_QUESTIONS.length - 1 ? (
                                         <button onClick={finalizeTest} className="px-12 bg-green-600 text-white font-black text-xl rounded-[2rem] shadow-xl hover:bg-green-700 transition-all active:scale-95">Finish Session</button>
                                     ) : (
-                                        <button onClick={() => setCurrentQIdx(currentQIdx + 1)} className="px-10 bg-indigo-600 text-white rounded-[2rem] shadow-xl hover:bg-indigo-700 transition-all active:scale-95"><ChevronRight className="w-8 h-8" /></button>
+                                        <button onClick={() => setCurrentQIdx(currentQIdx + 1)} className="px-10 bg-blue-600 text-white rounded-[2rem] shadow-xl hover:bg-blue-700 transition-all active:scale-95"><ChevronRight className="w-8 h-8" /></button>
                                     )}
                                 </div>
                             </div>
@@ -679,7 +772,7 @@ const ExaminationCenter: React.FC<ExaminationCenterProps> = ({ user, onSaveResul
             {/* SUBMITTING PHASE */}
             {phase === 'SUBMITTING' && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in text-center">
-                    <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-8" />
+                    <Loader2 className="w-16 h-16 text-blue-600 animate-spin mb-8" />
                     <h2 className="text-4xl font-black dark:text-white uppercase tracking-tighter">Finalizing Response</h2>
                     <p className="text-slate-500">Encrypting behavioral logs and indexing results...</p>
                 </div>

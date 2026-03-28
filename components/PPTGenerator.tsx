@@ -59,7 +59,7 @@ const PPTGenerator: React.FC<PPTGeneratorProps> = ({ onSave }) => {
                   doc.setFillColor(241, 245, 249); // slate-100
                   doc.rect(0, 0, width, 30, 'F');
                   
-                  doc.setFillColor(79, 70, 229); // indigo-600
+                  doc.setFillColor(37, 99, 235); // blue-600
                   doc.rect(margin, 28, width - (margin * 2), 2, 'F');
 
                   // 3. Title

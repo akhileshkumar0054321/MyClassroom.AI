@@ -1,6 +1,6 @@
 {
-  "name": " MyClassroom",
-  "description": "A comprehensive AI-powered educational assistant for personalized learning content generation, including videos, ebooks, notes, and tests.",
+  "name": "AI Exam Portal",
+  "description": "A robust AI-proctored examination portal with real-time integrity monitoring, facial biometric verification, and a strike-based anti-cheat system.",
   "requestFramePermissions": [
     "camera",
     "microphone"

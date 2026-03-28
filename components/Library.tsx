@@ -124,8 +124,8 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
                 <div className="bg-white dark:bg-gray-800 w-full max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
                     <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-                                {React.createElement(getIcon(previewItem.type), { className: "w-5 h-5 text-indigo-600 dark:text-indigo-400" })}
+                            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                                {React.createElement(getIcon(previewItem.type), { className: "w-5 h-5 text-blue-600 dark:text-blue-400" })}
                             </div>
                             <div>
                                 <h3 className="font-bold text-lg dark:text-white leading-tight">{previewItem.title}</h3>
@@ -154,7 +154,7 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
                         {previewItem.userId !== user.id && (
                             <button 
                                 onClick={() => { onImport(previewItem); setPreviewItem(null); }}
-                                className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 flex items-center gap-2 shadow-lg"
+                                className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 flex items-center gap-2 shadow-lg"
                             >
                                 <Import className="w-4 h-4" /> Import to Library
                             </button>
@@ -167,7 +167,7 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
             <div>
                 <h2 className="text-3xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                     {viewMode === 'FRIENDS' ? <Globe className="w-8 h-8 text-indigo-500"/> :
+                     {viewMode === 'FRIENDS' ? <Globe className="w-8 h-8 text-blue-500"/> :
                      <BookOpen className="w-8 h-8 text-primary-500" />}
                     
                     {viewMode === 'MY_LIBRARY' ? 'My Library' : 
@@ -188,7 +188,7 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
                 </button>
                 <button 
                     onClick={() => setViewMode('FRIENDS')}
-                    className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'FRIENDS' ? 'bg-white dark:bg-gray-600 shadow text-indigo-600' : 'text-gray-500 dark:text-gray-300'}`}
+                    className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'FRIENDS' ? 'bg-white dark:bg-gray-600 shadow text-blue-600' : 'text-gray-500 dark:text-gray-300'}`}
                 >
                     Friends
                 </button>
@@ -229,16 +229,16 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
                         <button 
                             key={fid} 
                             onClick={() => handleViewFriend(fid)}
-                            className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:border-indigo-500 transition-colors text-left group"
+                            className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:border-blue-500 transition-colors text-left group"
                         >
-                            <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold group-hover:scale-110 transition-transform">
+                            <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold group-hover:scale-110 transition-transform">
                                 {fid.charAt(3)}
                             </div>
                             <div>
                                 <h3 className="font-bold dark:text-white">Friend {fid.split('-')[1]}</h3>
                                 <p className="text-xs text-gray-500">{fid}</p>
                             </div>
-                            <Globe className="w-5 h-5 text-gray-400 ml-auto group-hover:text-indigo-500" />
+                            <Globe className="w-5 h-5 text-gray-400 ml-auto group-hover:text-blue-500" />
                         </button>
                     ))
                 )}
@@ -323,7 +323,7 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
                                         </button>
                                         <button 
                                             onClick={() => onImport(item)}
-                                            className="flex-1 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                                            className="flex-1 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                         >
                                             <Import className="w-4 h-4"/> Import
                                         </button>
@@ -349,7 +349,7 @@ const Library: React.FC<LibraryProps> = ({ items, user, friends, onUpdateItem, o
         
         {viewMode === 'FRIENDS' && selectedFriend && (
              <div className="mt-6">
-                 <button onClick={() => setSelectedFriend(null)} className="text-indigo-600 hover:underline text-sm font-bold flex items-center gap-1">
+                 <button onClick={() => setSelectedFriend(null)} className="text-blue-600 hover:underline text-sm font-bold flex items-center gap-1">
                      ← Back to Friend List
                  </button>
              </div>

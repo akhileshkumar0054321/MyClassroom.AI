@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   AppView, User, UserRole, UserProfile, Notification, 
@@ -23,10 +22,14 @@ import ProfileManager from './components/ProfileManager';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import JudgeControls from './components/JudgeControls';
 import OnboardingTour from './components/OnboardingTour';
+import ExamPortalLogin from './components/ExamPortalLogin';
+import InvigilatorLogin from './components/InvigilatorLogin';
+import InvigilatorDashboard from './components/InvigilatorDashboard';
 import { generateCareerPath } from './services/gemini';
 import { 
     Bell, X, LogIn, UserCircle, GraduationCap, Briefcase, 
-    Beaker, Loader2, Play, CheckCircle, Sparkles, ShieldAlert, FileText, ShieldCheck, Shield
+    Beaker, Loader2, Play, CheckCircle, Sparkles, ShieldAlert, FileText, ShieldCheck, Shield,
+    Mail, ArrowRight, Lock, Key, Globe
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -133,15 +136,19 @@ const App: React.FC = () => {
   const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [friends, setFriends] = useState<string[]>([]);
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
 
   // Virtual Lab & Career Path State
   const [careerResult, setCareerResult] = useState('');
   const [isGeneratingCareer, setIsGeneratingCareer] = useState(false);
 
   // Login State
+  const [loginStep, setLoginStep] = useState<'DETAILS' | 'OTP'>('DETAILS');
   const [loginEmail, setLoginEmail] = useState('');
+  const [loginOtp, setLoginOtp] = useState('');
   const [loginRole, setLoginRole] = useState<UserRole>(UserRole.STUDENT);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const handleLogin = (role: UserRole) => {
       const u = role === UserRole.TEACHER ? MOCK_TEACHER : MOCK_STUDENT;
@@ -155,38 +162,71 @@ const App: React.FC = () => {
   };
 
   const handleGuestExamLogin = () => {
-    // Guest Examination portal entry uses a generic Master role to access the unified hub
+    setView(AppView.EXAM_LOGIN);
+  };
+
+  const handleExamPortalAuth = (examId: string) => {
+    console.log("App: handleExamPortalAuth called with", examId);
     const guestUser: User = {
         id: `GUEST-EXAM-${Math.floor(Math.random()*10000)}`,
         name: 'Guest User',
         email: 'guest@myclassroom.ai',
-        role: UserRole.ADMIN, // Use Admin for full access to the guest portal hub
+        role: UserRole.ADMIN,
         preferences: { language: 'English', gradeLevel: '10', style: 'Visual' },
         profile: { ...MOCK_PROFILE, school: 'Examination Portal' },
         friends: []
     };
+    console.log("App: Setting user", guestUser);
     setUser(guestUser);
+    console.log("App: Setting selectedExamId", examId);
+    setSelectedExamId(examId);
+    console.log("App: Setting view to EXAMINATION");
     setView(AppView.EXAMINATION);
-    setOnboardingComplete(true); // Skip onboarding for direct exam access
+    setOnboardingComplete(true);
   };
 
   const handleEmailLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if(!loginEmail.toLowerCase().endsWith('.com')) {
-        alert("Please enter a valid .com email (e.g. user@gmail.com)");
+        alert("Please enter a valid .com email address.");
+        return;
+    }
+    setIsLoggingIn(true);
+    // Simulate sending OTP to Gmail
+    setTimeout(() => {
+        setIsLoggingIn(false);
+        setLoginStep('OTP');
+        addNotification('OTP Sent', `Testing code '123456' has been sent to ${loginEmail}`, 'SUCCESS');
+    }, 1200);
+  };
+
+  const handleGoogleLogin = () => {
+      setIsGoogleLoading(true);
+      // Simulate Google Identity Service window
+      setTimeout(() => {
+          setIsGoogleLoading(false);
+          setLoginEmail('alex.miller@gmail.com');
+          setLoginStep('OTP');
+          addNotification('Google Account Linked', "Code '123456' sent to your Gmail.", 'SUCCESS');
+      }, 1500);
+  };
+
+  const handleVerifyLoginOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Allow any 6-digit code for demo purposes, but keep '123456' as the suggested one
+    if (loginOtp.length !== 6) {
+        alert("Please enter a 6-digit verification code.");
         return;
     }
     setIsLoggingIn(true);
     setTimeout(() => {
         setIsLoggingIn(false);
+        const baseUser = loginRole === UserRole.TEACHER ? MOCK_TEACHER : MOCK_STUDENT;
         const mockUser: User = {
-            id: `MC-${Math.floor(Math.random()*10000)}`,
+            ...baseUser,
             name: loginEmail.split('@')[0],
             email: loginEmail,
             role: loginRole,
-            preferences: { language: 'English', gradeLevel: '10', style: 'Visual' },
-            profile: { ...MOCK_PROFILE, school: 'MyClassroom High' },
-            friends: []
         };
         setUser(mockUser);
         setView(AppView.DASHBOARD);
@@ -195,12 +235,15 @@ const App: React.FC = () => {
         } else {
             setOnboardingComplete(true);
         }
-    }, 1500);
+    }, 1000);
   };
 
   const handleLogout = () => {
       setUser(null);
       setView(AppView.LOGIN);
+      setLoginStep('DETAILS');
+      setLoginEmail('');
+      setLoginOtp('');
   };
 
   const addNotification = (title: string, message: string, type: 'INFO' | 'SUCCESS' | 'ERROR' | 'EMAIL') => {
@@ -246,7 +289,7 @@ const App: React.FC = () => {
   const renderCareerPath = () => (
       <div className="p-6 max-w-4xl mx-auto">
           <div className="flex items-center gap-3 mb-8">
-              <div className="p-3 bg-indigo-100 rounded-full text-indigo-600"><Briefcase className="w-8 h-8"/></div>
+              <div className="p-3 bg-blue-100 rounded-full text-blue-600"><Briefcase className="w-8 h-8"/></div>
               <h2 className="text-3xl font-bold dark:text-white">AI Career Counselor</h2>
           </div>
           
@@ -267,7 +310,7 @@ const App: React.FC = () => {
                         setIsGeneratingCareer(false);
                     }}
                     disabled={isGeneratingCareer}
-                    className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2"
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2"
                   >
                       {isGeneratingCareer ? <Loader2 className="animate-spin"/> : 'Generate Career Path'}
                   </button>
@@ -280,11 +323,24 @@ const App: React.FC = () => {
       </div>
   );
 
-  if (!user || view === AppView.LOGIN) {
+  if (!user || view === AppView.LOGIN || view === AppView.EXAM_LOGIN || view === AppView.INVIGILATOR_LOGIN) {
+      if (view === AppView.EXAM_LOGIN) {
+          return <ExamPortalLogin 
+            onLogin={handleExamPortalAuth} 
+            onBack={() => setView(AppView.LOGIN)} 
+            addNotification={addNotification}
+          />;
+      }
+      if (view === AppView.INVIGILATOR_LOGIN) {
+          return <InvigilatorLogin 
+            onLogin={(u) => { setUser(u); setView(AppView.INVIGILATOR_DASHBOARD); }} 
+            onBack={() => setView(AppView.LOGIN)} 
+          />;
+      }
       return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-            <div className="max-w-5xl w-full bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-2 min-h-[600px] animate-fade-in">
-                <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-12 text-white flex flex-col justify-between relative overflow-hidden">
+            <div className="max-w-5xl w-full bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-2 min-h-[650px] animate-fade-in border border-gray-100 dark:border-gray-700">
+                <div className="bg-gradient-to-br from-blue-600 to-purple-700 p-12 text-white flex flex-col justify-between relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
                     
                     <div className="relative z-10">
@@ -292,8 +348,8 @@ const App: React.FC = () => {
                            <Sparkles className="w-6 h-6 text-yellow-300" />
                         </div>
                         <h1 className="text-4xl font-bold mb-4">MyClassroom AI</h1>
-                        <p className="text-indigo-100 text-lg leading-relaxed">
-                            The next generation of personalized learning. Powered by Gemini 2.5.
+                        <p className="text-blue-100 text-lg leading-relaxed">
+                            The next generation of personalized learning. Powered by OpenAI.
                         </p>
                     </div>
 
@@ -302,91 +358,171 @@ const App: React.FC = () => {
                             <div className="bg-white/20 p-2 rounded-lg"><Play className="w-6 h-6 text-white" /></div>
                             <div>
                                 <h3 className="font-bold">AI Video Lessons</h3>
-                                <p className="text-xs text-indigo-200">Instant educational content generation</p>
+                                <p className="text-xs text-blue-200">Instant educational content generation</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-4 bg-white/10 p-4 rounded-xl backdrop-blur-sm border border-white/10">
-                            <div className="bg-white/20 p-2 rounded-lg"><ShieldAlert className="w-6 h-6 text-white" /></div>
+                            <div className="bg-white/20 p-2 rounded-lg"><ShieldCheck className="w-6 h-6 text-white" /></div>
                             <div>
-                                <h3 className="font-bold">Proctored Exams</h3>
-                                <p className="text-xs text-indigo-200">Secure AI-monitored testing environment</p>
+                                <h3 className="font-bold">Enterprise Proctoring</h3>
+                                <p className="text-xs text-blue-200">Secure AI-monitored testing environment</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-4 bg-white/10 p-4 rounded-xl backdrop-blur-sm border border-white/10">
                             <div className="bg-white/20 p-2 rounded-lg"><FileText className="w-6 h-6 text-white" /></div>
                             <div>
-                                <h3 className="font-bold">Smart Notes</h3>
-                                <p className="text-xs text-indigo-200">Auto-generated revision materials</p>
+                                <h3 className="font-bold">Smart Revision</h3>
+                                <p className="text-xs text-blue-200">Auto-generated smart notes & study paths</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div className="p-12 flex flex-col justify-center bg-white dark:bg-gray-800">
-                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Get Started</h2>
-                    <p className="text-gray-500 mb-8">Select your role to access the dashboard.</p>
+                    {loginStep === 'DETAILS' ? (
+                        <>
+                            <div className="mb-6 flex justify-center">
+                                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-3xl border border-blue-100 dark:border-blue-800">
+                                    <Sparkles className="w-10 h-10 text-blue-600 animate-pulse" />
+                                </div>
+                            </div>
+                            <h2 className="text-3xl font-black text-gray-900 dark:text-white mb-2 tracking-tight text-center uppercase">Access Hub</h2>
+                            <p className="text-gray-500 mb-8 text-center">Identity verification required for exam security.</p>
 
-                    <div className="grid grid-cols-3 gap-4 mb-6">
-                        <button 
-                            onClick={() => setLoginRole(UserRole.STUDENT)}
-                            className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.STUDENT ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'}`}
-                        >
-                            <UserCircle className="w-8 h-8" />
-                            <span className="font-bold dark:text-white text-sm">Student</span>
-                        </button>
-                        
-                        <button 
-                            onClick={handleGuestExamLogin}
-                            className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 flex flex-col items-center gap-2 transition-all hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 group"
-                        >
-                            <ShieldCheck className="w-8 h-8 text-gray-400 group-hover:text-red-500" />
-                            <span className="font-bold dark:text-white text-sm">Examination</span>
-                        </button>
+                            <div className="grid grid-cols-2 gap-4 mb-8">
+                                <button 
+                                    onClick={() => setLoginRole(UserRole.STUDENT)}
+                                    className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.STUDENT ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 ring-4 ring-blue-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-blue-300'}`}
+                                >
+                                    <UserCircle className="w-8 h-8" />
+                                    <span className="font-bold text-sm">Student</span>
+                                </button>
 
-                        <button 
-                            onClick={() => setLoginRole(UserRole.TEACHER)}
-                            className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.TEACHER ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300'}`}
-                        >
-                            <GraduationCap className="w-8 h-8" />
-                            <span className="font-bold dark:text-white text-sm">Teacher</span>
-                        </button>
-                    </div>
+                                <button 
+                                    onClick={() => setLoginRole(UserRole.TEACHER)}
+                                    className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${loginRole === UserRole.TEACHER ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 ring-4 ring-blue-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-blue-300'}`}
+                                >
+                                    <GraduationCap className="w-8 h-8" />
+                                    <span className="font-bold text-sm">Teacher</span>
+                                </button>
+                                
+                                <button 
+                                    onClick={handleGuestExamLogin}
+                                    className="p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 flex flex-col items-center gap-2 transition-all hover:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 group col-span-2"
+                                >
+                                    <ShieldCheck className="w-8 h-8 text-gray-400 group-hover:text-red-500" />
+                                    <span className="font-bold text-sm">Exam Portal</span>
+                                </button>
+                            </div>
 
-                    <form onSubmit={handleEmailLogin} className="space-y-4 mb-8">
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
-                            <input 
-                                type="email" 
-                                required
-                                value={loginEmail}
-                                onChange={e => setLoginEmail(e.target.value)}
-                                placeholder="Enter any .com email"
-                                className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                            />
-                            <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
-                                <CheckCircle className="w-3 h-3 text-green-500" /> Auto OTP (123456) created for .com domains
-                            </p>
+                            <button 
+                                onClick={handleGoogleLogin}
+                                disabled={isGoogleLoading}
+                                className="w-full py-4 bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition-all mb-6 shadow-sm disabled:opacity-50"
+                            >
+                                {isGoogleLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Globe className="w-5 h-5 text-blue-600" />}
+                                Login with Google
+                            </button>
+
+                            <div className="relative mb-6">
+                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200 dark:border-gray-700"></div></div>
+                                <div className="relative flex justify-center text-xs uppercase tracking-widest font-bold"><span className="px-2 bg-white dark:bg-gray-800 text-gray-400">or use school email</span></div>
+                            </div>
+
+                            <form onSubmit={handleEmailLogin} className="space-y-4 mb-8">
+                                <div className="relative group">
+                                    <Mail className="absolute left-4 top-4 text-gray-400 group-focus-within:text-blue-600 transition-colors w-5 h-5" />
+                                    <input 
+                                        type="email" 
+                                        required
+                                        value={loginEmail}
+                                        onChange={e => setLoginEmail(e.target.value)}
+                                        placeholder="Email Address (.com required)"
+                                        className="w-full pl-12 pr-4 py-4 rounded-xl border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 transition-all outline-none font-medium"
+                                    />
+                                </div>
+                                <button 
+                                    type="submit"
+                                    disabled={isLoggingIn}
+                                    className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-70 transition-all active:scale-95 text-lg uppercase tracking-wider"
+                                >
+                                    {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : "Request Verification"}
+                                </button>
+                            </form>
+                        </>
+                    ) : (
+                        <div className="animate-fade-in text-center">
+                            <button onClick={() => setLoginStep('DETAILS')} className="text-gray-400 hover:text-blue-600 font-bold text-sm mb-6 flex items-center gap-1 transition-colors mx-auto">
+                                <ArrowRight className="w-4 h-4 rotate-180" /> Back to Account Selection
+                            </button>
+                            
+                            <div className="w-20 h-20 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Key className="w-10 h-10 text-blue-600" />
+                            </div>
+                            
+                            <h2 className="text-3xl font-black text-gray-900 dark:text-white mb-2 tracking-tight">Verify Identity</h2>
+                            <p className="text-gray-500 mb-8 leading-relaxed">Enter the 6-digit code sent to <br/><span className="font-bold text-blue-600">{loginEmail}</span>.</p>
+
+                            <form onSubmit={handleVerifyLoginOtp} className="space-y-6">
+                                <div className="relative group">
+                                    <Lock className="absolute left-4 top-4 text-gray-400 group-focus-within:text-blue-600 transition-colors w-5 h-5" />
+                                    <input 
+                                        value={loginOtp}
+                                        onChange={e => setLoginOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        placeholder="123456"
+                                        className="w-full pl-12 pr-4 py-5 rounded-2xl border-2 border-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white focus:border-blue-600 transition-all outline-none font-black text-3xl tracking-[0.4em] text-center"
+                                        maxLength={6}
+                                        required
+                                    />
+                                </div>
+                                <button 
+                                    type="submit"
+                                    disabled={isLoggingIn || loginOtp.length < 6}
+                                    className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-2xl flex items-center justify-center gap-3 disabled:opacity-30 transition-all active:scale-95 text-xl"
+                                >
+                                    {isLoggingIn ? <Loader2 className="w-6 h-6 animate-spin" /> : <><CheckCircle className="w-6 h-6"/> Confirm Identity</>}
+                                </button>
+                                <div className="pt-4">
+                                    <p className="text-sm text-gray-400">
+                                        Didn't receive code? <button type="button" className="text-blue-600 font-bold hover:underline" onClick={() => addNotification('OTP Resent', 'Code 123456 has been resent.', 'INFO')}>Resend Code</button>
+                                    </p>
+                                </div>
+                            </form>
                         </div>
-                        <button 
-                            type="submit"
-                            disabled={isLoggingIn}
-                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-70 transition-all active:scale-95"
-                        >
-                            {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : "Get OTP & Access Dashboard"}
-                        </button>
-                    </form>
+                    )}
 
-                    <div className="relative mb-6">
-                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200 dark:border-gray-700"></div></div>
-                        <div className="relative flex justify-center text-sm"><span className="px-2 bg-white dark:bg-gray-800 text-gray-500">OR continue with demo</span></div>
+                    <div className="relative my-8">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100 dark:border-gray-700"></div></div>
+                        <div className="relative flex justify-center text-xs uppercase tracking-[0.2em] font-bold"><span className="px-3 bg-white dark:bg-gray-800 text-gray-300">Quick Access</span></div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <button onClick={() => handleLogin(UserRole.TEACHER)} className="py-3 px-4 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-white font-bold text-sm transition-colors">
-                            Teacher Demo
+                    <div className="grid grid-cols-3 gap-4">
+                        <button 
+                            onClick={() => handleLogin(UserRole.TEACHER)} 
+                            className="group flex flex-col items-center gap-3 p-6 rounded-2xl bg-gray-50 dark:bg-gray-700/50 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-100 dark:border-gray-600 transition-all hover:border-blue-200"
+                        >
+                            <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                                <GraduationCap className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <span className="text-sm font-bold text-gray-600 dark:text-gray-300">Teacher Portal</span>
                         </button>
-                        <button onClick={() => handleLogin(UserRole.STUDENT)} className="py-3 px-4 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-white font-bold text-sm transition-colors">
-                            Student Demo
+                        <button 
+                            onClick={() => setView(AppView.INVIGILATOR_LOGIN)}
+                            className="group flex flex-col items-center gap-3 p-6 rounded-2xl bg-gray-50 dark:bg-gray-700/50 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-100 dark:border-gray-600 transition-all hover:border-blue-200"
+                        >
+                            <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                                <ShieldCheck className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <span className="text-sm font-bold text-gray-600 dark:text-gray-300">Invigilator</span>
+                        </button>
+                        <button 
+                            onClick={() => handleLogin(UserRole.STUDENT)} 
+                            className="group flex flex-col items-center gap-3 p-6 rounded-2xl bg-gray-50 dark:bg-gray-700/50 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-gray-100 dark:border-gray-600 transition-all hover:border-blue-200"
+                        >
+                            <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                                <UserCircle className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <span className="text-sm font-bold text-gray-600 dark:text-gray-300">Student Portal</span>
                         </button>
                     </div>
                 </div>
@@ -395,7 +531,7 @@ const App: React.FC = () => {
       );
   }
 
-  const isExaminationView = view === AppView.EXAMINATION;
+  const isExaminationView = view === AppView.EXAMINATION || view === AppView.INVIGILATOR_DASHBOARD;
 
   return (
     <div className="flex bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100 font-sans transition-colors duration-200">
@@ -411,16 +547,21 @@ const App: React.FC = () => {
       <main className={`flex-1 relative transition-all duration-300 ${isExaminationView ? 'ml-0' : 'ml-64'}`}>
          <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2">
              {notifications.map(n => (
-                 <div key={n.id} className={`p-4 rounded-lg shadow-xl flex items-center gap-3 animate-slide-in min-w-[300px] ${
+                 <div key={n.id} className={`p-4 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-3 animate-slide-in min-w-[320px] border border-white/20 backdrop-blur-md ${
                      n.type === 'SUCCESS' ? 'bg-green-600 text-white' : 
                      n.type === 'ERROR' ? 'bg-red-600 text-white' : 
                      'bg-blue-600 text-white'
                  }`}>
-                     <Bell className="w-5 h-5" />
-                     <div>
-                         <p className="font-bold text-sm">{n.title}</p>
+                     <div className="bg-white/20 p-2 rounded-lg">
+                        <Bell className="w-5 h-5" />
+                     </div>
+                     <div className="flex-1">
+                         <p className="font-bold text-sm tracking-tight">{n.title}</p>
                          <p className="text-xs opacity-90">{n.message}</p>
                      </div>
+                     <button onClick={() => setNotifications(prev => prev.filter(not => not.id !== n.id))} className="text-white/50 hover:text-white">
+                        <X className="w-4 h-4" />
+                     </button>
                  </div>
              ))}
          </div>
@@ -468,7 +609,8 @@ const App: React.FC = () => {
             onAddTest={(t) => setTests([...tests, t])}
             onSaveResult={(r) => { setTestResults([...testResults, r]); addNotification('Public Exam Submitted', 'Result Saved', 'SUCCESS'); }}
             onLogout={handleLogout}
-         />}
+            preSelectedExam={selectedExamId || undefined}
+          />}
          {view === AppView.DOUBT_TUTOR && <DoubtTutor />}
          {view === AppView.LEARNING_PATH && <LearningPathBuilder />}
          {view === AppView.CLASSROOMS && <ClassroomManager 
@@ -513,6 +655,7 @@ const App: React.FC = () => {
          />}
          {view === AppView.PROFILE && <ProfileManager user={user} onUpdate={(u) => { setUser(u); addNotification('Profile Updated', 'Changes saved', 'SUCCESS'); }} />}
          {view === AppView.ANALYTICS && <AnalyticsDashboard />}
+         {view === AppView.INVIGILATOR_DASHBOARD && <InvigilatorDashboard user={user} onLogout={handleLogout} />}
          {view === AppView.VIRTUAL_LAB && renderVirtualLab()}
          {view === AppView.CAREER_PATH && renderCareerPath()}
       </main>

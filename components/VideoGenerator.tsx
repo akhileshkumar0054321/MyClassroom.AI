@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { generateVideoScript } from '../services/gemini';
+import { generateVideoScript, generateVeoPreview } from '../services/gemini';
 import { VideoScript, VideoChapter } from '../types';
-import { Play, Pause, Loader2, Video as VideoIcon, BrainCircuit, Lightbulb, Sparkles, MonitorPlay, RefreshCw, Download, Share2 } from 'lucide-react';
+import { Play, Pause, Loader2, Video as VideoIcon, BrainCircuit, Lightbulb, Sparkles, MonitorPlay, RefreshCw, Download, Share2, Film, Wand2, ShieldAlert } from 'lucide-react';
 
 interface VideoGeneratorProps {
     onSave?: (script: VideoScript) => void;
@@ -12,7 +12,9 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState(2); 
   const [loading, setLoading] = useState(false);
+  const [veoLoading, setVeoLoading] = useState(false);
   const [script, setScript] = useState<VideoScript | null>(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Player State
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
@@ -255,14 +257,24 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
 
   // --- GENERATION LOGIC ---
   const handleGenerate = async () => {
+    if (!prompt) return;
     setLoading(true);
+    setError(null);
     setThinkingStep('Analyzing Prompt...');
     
-    setTimeout(() => setThinkingStep('Generating Script & Slides...'), 1000);
-    setTimeout(() => setThinkingStep('Drafting Visual Cues...'), 2500);
-
     try {
+      setThinkingStep('Generating Educational Script & Slides...');
       const result = await generateVideoScript(prompt, duration, 'English', 'Educational');
+      
+      setThinkingStep('Creating AI Video Preview (Chapter 1)...');
+      setVeoLoading(true);
+      const firstChapterCue = result.chapters[0]?.visualCue || prompt;
+      const veoUrl = await generateVeoPreview(firstChapterCue);
+      
+      if (result.chapters[0]) {
+          result.chapters[0].veoUrl = veoUrl || undefined;
+      }
+      
       setScript(result);
       setCurrentChapterIndex(0);
       
@@ -271,10 +283,30 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
 
     } catch (error) {
       console.error("Failed to generate content", error);
+      setError("Generation timed out or failed. Please try a simpler prompt.");
     } finally {
       setLoading(false);
+      setVeoLoading(false);
       setThinkingStep('');
     }
+  };
+
+  const handleRegenerateScene = async (index: number) => {
+      if (!script) return;
+      setVeoLoading(true);
+      try {
+          const cue = script.chapters[index].visualCue;
+          const url = await generateVeoPreview(cue);
+          if (url) {
+              const updatedChapters = [...script.chapters];
+              updatedChapters[index].veoUrl = url;
+              setScript({ ...script, chapters: updatedChapters });
+          }
+      } catch (e) {
+          console.error("Failed to regenerate scene", e);
+      } finally {
+          setVeoLoading(false);
+      }
   };
 
   // Cleanup
@@ -329,7 +361,7 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
             <button
               onClick={handleGenerate}
               disabled={loading || !prompt}
-              className="w-full py-4 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-700 hover:to-indigo-700 text-white rounded-xl font-bold shadow-lg transition-all flex justify-center items-center gap-2 disabled:opacity-50 text-lg"
+              className="w-full py-4 bg-gradient-to-r from-primary-600 to-blue-600 hover:from-primary-700 hover:to-blue-700 text-white rounded-xl font-bold shadow-lg transition-all flex justify-center items-center gap-2 disabled:opacity-50 text-lg"
             >
               Generate Video
             </button>
@@ -341,44 +373,82 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
           <div className="lg:col-span-3 space-y-6">
             
             {loading ? (
-                 <div className="bg-black rounded-xl overflow-hidden aspect-video flex flex-col items-center justify-center text-white shadow-2xl">
-                     <Loader2 className="w-16 h-16 animate-spin mb-4 text-primary-500" />
-                     <h3 className="text-xl font-bold animate-pulse">{thinkingStep}</h3>
+                 <div className="bg-black rounded-xl overflow-hidden aspect-video flex flex-col items-center justify-center text-white shadow-2xl p-10 text-center">
+                     <div className="relative mb-8">
+                         <Loader2 className="w-20 h-20 animate-spin text-primary-500" />
+                         <Sparkles className="w-8 h-8 text-yellow-400 absolute -top-2 -right-2 animate-pulse" />
+                     </div>
+                     <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter">{thinkingStep}</h3>
+                     <p className="text-gray-400 max-w-md">Our AI is orchestrating your lesson. This usually takes 30-60 seconds depending on complexity.</p>
                  </div>
+            ) : error ? (
+                <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-xl p-10 text-center">
+                    <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold text-red-700 dark:text-red-400 mb-2">Generation Error</h3>
+                    <p className="text-red-600 dark:text-red-300 mb-6">{error}</p>
+                    <button onClick={() => setError(null)} className="px-6 py-2 bg-red-600 text-white rounded-lg font-bold">Try Again</button>
+                </div>
             ) : (
                 <div className="relative group">
-                    <canvas 
-                        ref={canvasRef} 
-                        width={1280} 
-                        height={720} 
-                        className="w-full h-auto bg-black rounded-xl shadow-2xl"
-                    />
+                    {script?.chapters[currentChapterIndex]?.veoUrl ? (
+                        <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border-4 border-primary-500/20">
+                            <video 
+                                key={script.chapters[currentChapterIndex].veoUrl}
+                                src={script.chapters[currentChapterIndex].veoUrl}
+                                controls
+                                autoPlay
+                                className="w-full h-full object-cover"
+                            />
+                            <div className="absolute top-4 right-4 bg-primary-600 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg">
+                                <Film className="w-3 h-3" /> AI GENERATED SCENE
+                            </div>
+                        </div>
+                    ) : (
+                        <canvas 
+                            ref={canvasRef} 
+                            width={1280} 
+                            height={720} 
+                            className="w-full h-auto bg-black rounded-xl shadow-2xl"
+                        />
+                    )}
                     
-                    {/* Overlay Controls */}
-                    <div className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${isPlaying || isRecording ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
-                         {!isRecording && (
-                             <button 
-                                onClick={handlePlayPause}
-                                className="bg-white/20 backdrop-blur-sm p-6 rounded-full hover:bg-white/30 transition-all transform hover:scale-110"
-                             >
-                                 {isPlaying ? <Pause className="w-12 h-12 text-white fill-current" /> : <Play className="w-12 h-12 text-white fill-current" />}
-                             </button>
-                         )}
-                         {isRecording && (
-                             <div className="text-white flex flex-col items-center">
-                                 <div className="w-4 h-4 bg-red-500 rounded-full animate-pulse mb-2"></div>
-                                 <span className="font-bold">Recording in Progress...</span>
-                                 <span className="text-xs opacity-70">Please wait for the video to finish playing.</span>
-                             </div>
-                         )}
-                    </div>
+                    {/* Overlay Controls for Canvas */}
+                    {!script?.chapters[currentChapterIndex]?.veoUrl && (
+                        <div className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${isPlaying || isRecording ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+                             {!isRecording && (
+                                 <button 
+                                    onClick={handlePlayPause}
+                                    className="bg-white/20 backdrop-blur-sm p-6 rounded-full hover:bg-white/30 transition-all transform hover:scale-110"
+                                 >
+                                     {isPlaying ? <Pause className="w-12 h-12 text-white fill-current" /> : <Play className="w-12 h-12 text-white fill-current" />}
+                                 </button>
+                             )}
+                             {isRecording && (
+                                 <div className="text-white flex flex-col items-center">
+                                     <div className="w-4 h-4 bg-red-500 rounded-full animate-pulse mb-2"></div>
+                                     <span className="font-bold">Recording in Progress...</span>
+                                     <span className="text-xs opacity-70">Please wait for the video to finish playing.</span>
+                                 </div>
+                             )}
+                        </div>
+                    )}
 
                     <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                         <span className="text-white text-sm bg-black/50 px-2 py-1 rounded backdrop-blur-md">
-                            Slide {currentChapterIndex + 1} of {script.chapters.length}
+                            Slide {currentChapterIndex + 1} of {script?.chapters.length}
                         </span>
                         
                         <div className="flex gap-2">
+                             {script && !script.chapters[currentChapterIndex].veoUrl && (
+                                 <button 
+                                    onClick={() => handleRegenerateScene(currentChapterIndex)}
+                                    disabled={veoLoading}
+                                    className="text-white hover:bg-primary-600 bg-black/50 px-3 py-1 rounded-full backdrop-blur-md flex items-center gap-2 text-xs font-bold"
+                                 >
+                                    {veoLoading ? <Loader2 className="w-3 h-3 animate-spin"/> : <Wand2 className="w-3 h-3" />}
+                                    Generate AI Scene
+                                </button>
+                             )}
                              <button onClick={handleRestart} className="text-white hover:bg-white/20 bg-black/50 p-2 rounded-full backdrop-blur-md" title="Restart">
                                 <RefreshCw className="w-5 h-5" />
                             </button>
@@ -435,9 +505,9 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
 
           {/* AI Insights Sidebar */}
           {script && (
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 h-fit border-l-4 border-indigo-500 animate-slide-in">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 h-fit border-l-4 border-blue-500 animate-slide-in">
                 <h3 className="text-lg font-bold mb-4 dark:text-white flex items-center gap-2">
-                    <BrainCircuit className="w-5 h-5 text-indigo-500" />
+                    <BrainCircuit className="w-5 h-5 text-blue-500" />
                     AI Teacher Insights
                 </h3>
                 <p className="text-xs text-gray-500 mb-4">
@@ -446,10 +516,10 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
                 
                 <div className="space-y-3">
                     {script.anticipatedQuestions?.map((q, idx) => (
-                        <div key={idx} className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-800">
+                        <div key={idx} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
                             <div className="flex items-start gap-2">
                                 <Lightbulb className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
-                                <p className="text-sm text-indigo-900 dark:text-indigo-200 font-medium leading-tight">{q}</p>
+                                <p className="text-sm text-blue-900 dark:text-blue-200 font-medium leading-tight">{q}</p>
                             </div>
                         </div>
                     ))}

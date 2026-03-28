@@ -17,14 +17,18 @@ export enum AppView {
   SOCIAL = 'SOCIAL',
   PROFILE = 'PROFILE',
   ASSIGNMENTS = 'ASSIGNMENTS',
-  ANALYTICS = 'ANALYTICS'
+  ANALYTICS = 'ANALYTICS',
+  EXAM_LOGIN = 'EXAM_LOGIN',
+  INVIGILATOR_LOGIN = 'INVIGILATOR_LOGIN',
+  INVIGILATOR_DASHBOARD = 'INVIGILATOR_DASHBOARD'
 }
 
 export enum UserRole {
   STUDENT = 'STUDENT',
   TEACHER = 'TEACHER',
   PARENT = 'PARENT',
-  ADMIN = 'ADMIN'
+  ADMIN = 'ADMIN',
+  INVIGILATOR = 'INVIGILATOR'
 }
 
 export interface UserProfile {
@@ -48,6 +52,7 @@ export interface User {
   };
   profile: UserProfile;
   friends: string[]; // List of Friend UIDs
+  exam?: string; // For Invigilators
 }
 
 export interface FriendRequest {
@@ -107,6 +112,7 @@ export interface VideoChapter {
   duration: string;
   content: string;
   visualCue: string;
+  veoUrl?: string; // AI Generated Video URL
 }
 
 export interface VideoScript {
@@ -115,6 +121,7 @@ export interface VideoScript {
   chapters: VideoChapter[];
   summary: string;
   anticipatedQuestions: string[]; // AI Teacher Insights
+  veoUrl?: string; // Main video preview
 }
 
 // PPT Types
@@ -276,4 +283,25 @@ export interface DoubtResponse {
     answer: string;
     isAcademic: boolean;
     relatedQuestions: string[];
+}
+
+export interface StudentSession {
+  studentId: string;
+  studentName: string;
+  examId: string;
+  examTitle: string;
+  startTime: string;
+  status: 'ACTIVE' | 'KICKED' | 'DISCONNECTED' | 'COMPLETED';
+  slashCount: number;
+  lastViolation?: string;
+  socketId?: string;
+}
+
+export interface InvigilatorAction {
+  id: string;
+  invigilatorId: string;
+  studentId: string;
+  action: 'KICK' | 'WARN';
+  timestamp: string;
+  reason?: string;
 }
