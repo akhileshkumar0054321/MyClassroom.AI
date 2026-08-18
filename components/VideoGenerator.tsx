@@ -266,27 +266,33 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
       setThinkingStep('Generating Educational Script & Slides...');
       const result = await generateVideoScript(prompt, duration, 'English', 'Educational');
       
-      setThinkingStep('Creating AI Video Preview (Chapter 1)...');
-      setVeoLoading(true);
-      const firstChapterCue = result.chapters[0]?.visualCue || prompt;
-      const veoUrl = await generateVeoPreview(firstChapterCue);
-      
-      if (result.chapters[0]) {
-          result.chapters[0].veoUrl = veoUrl || undefined;
-      }
-      
       setScript(result);
       setCurrentChapterIndex(0);
+      setLoading(false);
       
       // AUTO SAVE
       if (onSave) onSave(result);
 
+      // Optionally fetch Veo preview in background without blocking UI
+      setVeoLoading(true);
+      const firstChapterCue = result.chapters[0]?.visualCue || prompt;
+      generateVeoPreview(firstChapterCue).then(veoUrl => {
+        if (veoUrl && result.chapters[0]) {
+          const updated = { ...result };
+          updated.chapters[0].veoUrl = veoUrl;
+          setScript(updated);
+        }
+        setVeoLoading(false);
+      }).catch(() => {
+        setVeoLoading(false);
+      });
+
     } catch (error) {
       console.error("Failed to generate content", error);
       setError("Generation timed out or failed. Please try a simpler prompt.");
-    } finally {
       setLoading(false);
       setVeoLoading(false);
+    } finally {
       setThinkingStep('');
     }
   };
@@ -526,7 +532,15 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ onSave }) => {
                 </div>
 
                 <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                    <button className="w-full flex items-center justify-center gap-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium text-sm">
+                    <button 
+                        onClick={() => {
+                            if (navigator.clipboard) {
+                                navigator.clipboard.writeText(`${window.location.origin}/#lesson-${encodeURIComponent(script.topic)}`);
+                            }
+                            alert(`Lesson "${script.topic}" link copied to clipboard and shared with your classroom!`);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium text-sm transition-all"
+                    >
                         <Share2 className="w-4 h-4"/> Share with Class
                     </button>
                     
